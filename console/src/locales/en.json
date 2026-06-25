@@ -1240,7 +1240,13 @@
     "batchDismissConfirm": "Dismiss {{count}} selected users?",
     "batchSuccess": "{{count}} users processed successfully",
     "batchRemove": "Delete",
-    "batchRemoveConfirm": "Delete {{count}} selected users?"
+    "batchRemoveConfirm": "Delete {{count}} selected users?",
+    "enabledSection": "Enabled",
+    "enabledCount": "{{count}}",
+    "availableSection": "Available",
+    "enableAction": "Enable",
+    "noEnabledChannels": "No enabled channels",
+    "goEnableChannels": "Enable channels"
   },
   "sessions": {
     "title": "Sessions",
