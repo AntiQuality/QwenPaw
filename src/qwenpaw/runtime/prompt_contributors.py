@@ -267,7 +267,7 @@ class ScrollContextContributor(SyncPromptContributor):
 
 
 class SkillListContributor(SyncPromptContributor):
-    """Inject a bullet list of available skills so the model knows what it can use."""
+    """Inject a bullet list of available skills."""
 
     name = "skill_list"
     priority = 45
@@ -302,13 +302,14 @@ class SkillListContributor(SyncPromptContributor):
         language = extras.get("language", "zh")
         if language == "zh":
             header = (
-                "## 可用 Skills\n\n"
-                "以下skills已启用。需要时加载对应的SKILL.md获取完整内容："
+                "## 可用 Skills\n\n" + "以下skills已启用。" + "需要时加载对应的SKILL.md获取完整内容："
             )
         else:
             header = (
                 "## Available Skills\n\n"
-                "The following skills are enabled. Load a skill's SKILL.md for full instructions when needed:"
+                + "The following skills are enabled. "
+                + "Load a skill's SKILL.md for full "
+                + "instructions when needed:"
             )
 
         return header + "\n" + "\n".join(lines)
