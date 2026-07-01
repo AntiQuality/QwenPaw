@@ -177,6 +177,7 @@ class AgentBuilder:
         if not hasattr(ctx, "extras") or ctx.extras is None:
             ctx.extras = {}
         ctx.extras["driver_prompt_hints"] = driver_prompt_hints
+        ctx.extras["effective_skills"] = effective_skills
 
         # Model + formatter (built before the toolkit so the scroll context
         # strategy, which needs the model for token counting, can wire in).

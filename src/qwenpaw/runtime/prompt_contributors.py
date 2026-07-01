@@ -266,6 +266,62 @@ class ScrollContextContributor(SyncPromptContributor):
         return build_scroll_system_prompt(language)
 
 
+class SkillListContributor(SyncPromptContributor):
+    """Inject a bullet list of available skills so the model knows what it can use."""
+
+    name = "skill_list"
+    priority = 45
+
+    def contribute_sync(self, ctx: "HookContext") -> str | None:
+        extras = getattr(ctx, "extras", {}) or {}
+        effective_skills: list[str] = extras.get("effective_skills") or []
+        if not effective_skills:
+            return None
+
+        wd = getattr(ctx, "workspace_dir", None)
+        if not wd:
+            return None
+
+        try:
+            from ..agents.skill_system.store import read_skill_manifest
+
+            manifest = read_skill_manifest(Path(wd))
+        except Exception:
+            return None
+
+        skills_data = manifest.get("skills", {})
+        lines: list[str] = []
+        for name in effective_skills:
+            entry = skills_data.get(name, {})
+            meta = entry.get("metadata", {})
+            desc = meta.get("description", "")
+            if not desc:
+                desc = entry.get("description", "")
+            if desc:
+                lines.append(f"- {name}: {desc}")
+            else:
+                lines.append(f"- {name}")
+
+        if not lines:
+            return None
+
+        language = extras.get("language", "en")
+        if language == "zh":
+            header = (
+                "## 可用 Skills\n\n"
+                "以下 skills 已启用。需要时用对应的 skill name 加载其"
+                " SKILL.md 获取完整指引："
+            )
+        else:
+            header = (
+                "## Available Skills\n\n"
+                "The following skills are enabled. Load a skill's"
+                " SKILL.md for full instructions when needed:"
+            )
+
+        return header + "\n" + "\n".join(lines)
+
+
 class EnvContextContributor(SyncPromptContributor):
     """Append the environment context block (time / session / OS)."""
 
@@ -299,6 +355,7 @@ _ALL_CONTRIBUTORS = (
     AgentsMdContributor,
     SoulMdContributor,
     ProfileMdContributor,
+    SkillListContributor,
     MultimodalHintContributor,
     CodingModeContributor,
     ScrollContextContributor,
@@ -320,6 +377,7 @@ __all__ = [
     "AgentsMdContributor",
     "SoulMdContributor",
     "ProfileMdContributor",
+    "SkillListContributor",
     "MultimodalHintContributor",
     "CodingModeContributor",
     "ScrollContextContributor",
