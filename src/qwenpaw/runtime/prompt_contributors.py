@@ -282,21 +282,15 @@ class SkillListContributor(SyncPromptContributor):
         if not wd:
             return None
 
-        try:
-            from ..agents.skill_system.store import read_skill_manifest
+        from ..agents.skill_system.store import read_skill_manifest
 
-            manifest = read_skill_manifest(Path(wd))
-        except Exception:
-            return None
-
+        manifest = read_skill_manifest(Path(wd))
         skills_data = manifest.get("skills", {})
         lines: list[str] = []
         for name in effective_skills:
             entry = skills_data.get(name, {})
             meta = entry.get("metadata", {})
             desc = meta.get("description", "")
-            if not desc:
-                desc = entry.get("description", "")
             if desc:
                 lines.append(f"- {name}: {desc}")
             else:
@@ -305,18 +299,16 @@ class SkillListContributor(SyncPromptContributor):
         if not lines:
             return None
 
-        language = extras.get("language", "en")
+        language = extras.get("language", "zh")
         if language == "zh":
             header = (
                 "## 可用 Skills\n\n"
-                "以下 skills 已启用。需要时用对应的 skill name 加载其"
-                " SKILL.md 获取完整指引："
+                "以下skills已启用。需要时加载对应的SKILL.md获取完整内容："
             )
         else:
             header = (
                 "## Available Skills\n\n"
-                "The following skills are enabled. Load a skill's"
-                " SKILL.md for full instructions when needed:"
+                "The following skills are enabled. Load a skill's SKILL.md for full instructions when needed:"
             )
 
         return header + "\n" + "\n".join(lines)
