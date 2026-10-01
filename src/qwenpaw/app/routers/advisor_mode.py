@@ -57,6 +57,7 @@ class AdvisorModeUpdateRequest(BaseModel):
     followup_enabled: Optional[bool] = None
     on_demand_enabled: Optional[bool] = None
     max_consults: Optional[int] = Field(default=None, ge=0)
+    recent_messages: Optional[int] = Field(default=None, ge=1)
     intervention: Optional[InterventionBody] = None
     advisor_thinking: Optional[AdvisorThinkingLevel] = None
     advisor_model: Optional[ModelSlotBody] = None
@@ -79,6 +80,7 @@ def _state(config) -> dict:
         "followup_enabled": bool(am.followup_enabled),
         "on_demand_enabled": bool(am.on_demand_enabled),
         "max_consults": int(am.max_consults),
+        "recent_messages": int(am.recent_messages),
         "intervention": am.intervention.model_dump(),
         "agent_id": config.id,
         "advisor_model": slot_to_dict(advisor),
@@ -143,6 +145,8 @@ async def post_advisor_mode_update(
             am.on_demand_enabled = body.on_demand_enabled
         if body.max_consults is not None:
             am.max_consults = body.max_consults
+        if body.recent_messages is not None:
+            am.recent_messages = body.recent_messages
         if body.intervention is not None:
             am.intervention = am.intervention.model_copy(
                 update=body.intervention.model_dump(exclude_none=True),

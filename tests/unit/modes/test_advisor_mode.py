@@ -615,7 +615,7 @@ async def test_tool_without_session_or_when_disabled(monkeypatch):
     assert mw.consults_used == 0
 
 
-async def test_session_state_carries_history_and_budget_across_requests(
+async def test_session_state_carries_plan_and_budget_across_requests(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -627,11 +627,12 @@ async def test_session_state_carries_history_and_budget_across_requests(
     cfg.advisor_mode.max_consults = 2
     first = mode.build_middleware(_ctx(cfg), cfg)
     first._advisor = _Advisor("A1")
+    first._plan = "THE PLAN"
     await first.consult("q1")
     assert first.consults_left == 1
 
     second = mode.build_middleware(_ctx(cfg), cfg)  # next user turn
-    assert second.advisor_history is first.advisor_history
+    assert second.plan == "THE PLAN"
     assert second.consults_used == 1 and second.consults_left == 1
     assert mode.current_middleware() is second
 
@@ -718,10 +719,10 @@ async def test_conversation_reset_forgets_the_session():
     mode = AdvisorMode()
     cfg = _config()
     mw = mode.build_middleware(_ctx(cfg), cfg)
-    mw.advisor_history.append({"role": "user", "content": "x"})
+    mw._plan = "x"
     await mode.on_conversation_reset(_ctx(cfg))
     fresh = mode.build_middleware(_ctx(cfg), cfg)
-    assert fresh.advisor_history == []
+    assert fresh.plan == ""
     assert fresh.consults_used == 0
 
 
@@ -734,13 +735,11 @@ async def test_leaving_the_mode_drops_the_session(monkeypatch):
         lambda _agent_id: cfg,
     )
     mode = _picked()
-    mode.build_middleware(_ctx(cfg), cfg).advisor_history.append(
-        {"role": "user", "content": "x"},
-    )
+    mode.build_middleware(_ctx(cfg), cfg)._plan = "x"
     await mode._command_handler(_ctx(cfg), "off")
     assert "sess-1" not in mode._sessions
     await mode._command_handler(_ctx(cfg), "on")
-    assert mode.build_middleware(_ctx(cfg), cfg).advisor_history == []
+    assert mode.build_middleware(_ctx(cfg), cfg).plan == ""
 
 
 async def test_status_mentions_the_consult_tool(monkeypatch):

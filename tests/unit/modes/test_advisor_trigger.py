@@ -249,15 +249,25 @@ def test_severity_struggling_when_calls_differ():
     assert events[0].severity == "struggling"
 
 
-def test_event_carries_recent_calls_for_the_advisor():
+def test_event_carries_the_failure_counts():
     trigger = InterventionTrigger(
         AdvisorInterventionConfig(consecutive_failures=3, window_failures=99),
     )
     events = _feed(trigger, [OK, FAIL, FAIL, FAIL])
-    recent = events[0].recent
-    assert len(recent) == 3
-    assert all(step.failed for step in recent)
-    assert recent[-1].tool == "execute_shell_command"
+    assert events[0].failures == 3
+    assert events[0].window_size == 4
+
+    trigger = InterventionTrigger(
+        AdvisorInterventionConfig(
+            consecutive_failures=99,
+            window_size=6,
+            window_failures=2,
+        ),
+    )
+    events = _feed(trigger, [FAIL, OK, OK, FAIL])
+    assert events[0].reason == "window"
+    assert events[0].failures == 2
+    assert events[0].window_size == 4, "the steps the window spanned"
 
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -290,15 +300,7 @@ def test_config_is_overridable_per_instance():
     assert InterventionTrigger(config=cfg).config is cfg
 
 
-# ── recent window + manual reset ────────────────────────────────────────
-
-
-def test_recent_exposes_the_last_steps_oldest_first():
-    trigger = InterventionTrigger(history_size=2)
-    _feed(trigger, [OK, FAIL, OK])
-    recent = trigger.recent
-    assert [s.output for s in recent] == [FAIL, OK]
-    assert [s.failed for s in recent] == [True, False]
+# ── manual reset ────────────────────────────────────────────────────────
 
 
 def test_reset_counters_forgets_the_current_run_but_not_the_budget():

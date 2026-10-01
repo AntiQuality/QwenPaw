@@ -3,8 +3,8 @@
 Advisor Mode pairs two models on one task: a stronger **advisor** and the **worker**, the agent that does the work.
 
 - Before the agent's first step in a conversation, the advisor writes a strategic plan for the task. The plan is injected into the agent's context as a `consult_advisor` tool call and result, so the agent reads it as something it asked for.
-- While the agent works, Advisor Mode watches its tool results. When the agent keeps failing (several failures in a row, or failures recurring over the last few steps), the advisor is consulted again with the recent calls. It replies **CONTINUE** (nothing is injected) or **ADJUST** followed by a short revised plan, which is injected as a `consult_advisor_followup` call.
-- The agent can also ask on its own: `consult_advisor` is a real tool in Advisor Mode. The agent is told to use it at a genuine decision point (before committing to a costly route, or when it is unsure whether to abandon an approach), not for routine steps. The advisor answers in free text with the agent's recent calls attached, and the exchange shares the same conversation as the plan and any interventions.
+- While the agent works, Advisor Mode watches its tool results. When the agent keeps failing (several failures in a row, or failures recurring over the last few steps), the advisor is consulted again. It replies **CONTINUE** (nothing is injected) or **ADJUST** followed by a short revised plan, which is injected as a `consult_advisor_followup` call.
+- The agent can also ask on its own: `consult_advisor` is a real tool in Advisor Mode. The agent is told to use it at a genuine decision point (before committing to a costly route, or when it is unsure whether to abandon an approach), not for routine steps. The advisor answers in free text. Every request to the advisor carries the task, the opening plan and the agent's latest messages, so the advisor sees what the agent actually did.
 
 The stronger model is called only a few times per task, while the cheaper model runs every step.
 
@@ -50,7 +50,7 @@ While the agent switch is off, `/advisor on` and `/advisor <task>` reply with wh
 
 The per-conversation switch lives in memory, like the Goal and custom loop modes: after QwenPaw restarts, a conversation is back in the default loop (and the advisor's memory of its plan is gone) until you pick Advisor again. The agent-level switch and everything else in the Advisor template are stored in `agent.json` and survive restarts.
 
-**API**: `GET /api/advisor-mode` returns the state (the switches, the models in effect and the defaults they fall back to). `POST /api/advisor-mode` with any of `{"enabled": true}`, `{"plan_enabled": false}`, `{"followup_enabled": false}`, `{"on_demand_enabled": false}`, `{"max_consults": 5}`, `{"advisor_model": {"provider_id": "…", "model": "…"}}`, `{"worker_model": null}` or `{"advisor_thinking": "off"}` updates it. Fields left out are unchanged and `null` clears a model override.
+**API**: `GET /api/advisor-mode` returns the state (the switches, the models in effect and the defaults they fall back to). `POST /api/advisor-mode` with any of `{"enabled": true}`, `{"plan_enabled": false}`, `{"followup_enabled": false}`, `{"on_demand_enabled": false}`, `{"max_consults": 5}`, `{"recent_messages": 8}`, `{"advisor_model": {"provider_id": "…", "model": "…"}}`, `{"worker_model": null}` or `{"advisor_thinking": "off"}` updates it. Fields left out are unchanged and `null` clears a model override.
 
 The setting is stored per agent in `agent.json`:
 
@@ -62,6 +62,7 @@ The setting is stored per agent in `agent.json`:
     "followup_enabled": true,
     "on_demand_enabled": true,
     "max_consults": 32,
+    "recent_messages": 20,
     "intervention": {
       "consecutive_failures": 3,
       "window_size": 10,
@@ -76,7 +77,7 @@ The setting is stored per agent in `agent.json`:
 }
 ```
 
-`max_consults` caps the agent's own questions per conversation (default 32). Past the cap the tool answers with a short notice and the agent carries on. Automatic interventions have their own cap (`max_interventions`, see below). With the opening plan switched off, the advisor is only consulted automatically (auto intervention) or by the agent (`consult_advisor`). The follow-up and consultation requests always carry the task itself, so they work without a plan.
+`max_consults` caps the agent's own questions per conversation (default 32). Past the cap the tool answers with a short notice and the agent carries on. Automatic interventions have their own cap (`max_interventions`, see below). With the opening plan switched off, the advisor is only consulted automatically (auto intervention) or by the agent (`consult_advisor`). The follow-up and consultation requests always carry the task itself, so they work without a plan. `recent_messages` sets how many of the agent's latest messages the advisor sees at each intervention or consultation (default 20, every text, tool call and tool result counts as one, long ones are clipped).
 
 Advisor Mode composes with Coding Mode. It is a loop mode of its own, so a conversation is either in Advisor Mode or in another loop mode (`/goal`, mission, custom loops), not both.
 

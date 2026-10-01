@@ -63,6 +63,7 @@ def test_get_reports_state_and_models(client):
         "followup_enabled": True,
         "on_demand_enabled": True,
         "max_consults": 32,
+        "recent_messages": 20,
         "intervention": {
             "consecutive_failures": 3,
             "window_size": 10,
@@ -135,6 +136,20 @@ def test_post_rejects_an_empty_model_slot(client):
         json={"advisor_model": {"provider_id": "", "model": "x"}},
     )
     assert resp.status_code == 422
+
+
+def test_post_updates_recent_messages(client, stored_config):
+    resp = client.post("/api/advisor-mode", json={"recent_messages": 8})
+    assert resp.status_code == 200
+    assert resp.json()["recent_messages"] == 8
+    assert stored_config.advisor_mode.recent_messages == 8
+    assert (
+        client.post(
+            "/api/advisor-mode",
+            json={"recent_messages": 0},
+        ).status_code
+        == 422
+    )
 
 
 def test_post_updates_max_consults(client, stored_config):

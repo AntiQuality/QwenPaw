@@ -2,8 +2,9 @@
 """Prompts used by Advisor Mode to talk to the advisor model.
 
 The system prompt carries every planning principle once, grouped by theme.
-The request templates only add what differs per request (the task and its
-context, the recent calls, the reply format), so no rule is stated twice.
+The request templates only add what differs per request (the task, the
+opening plan, the worker's recent messages, the reply format), so no rule
+is stated twice.
 """
 from __future__ import annotations
 
@@ -132,13 +133,15 @@ PLAN_REQUEST_TEMPLATE = (
 
 FOLLOWUP_REQUEST_TEMPLATE = (
     "# Progress check: intervention {index} of {max_interventions}\n\n"
-    "You are advising the worker on the task below. Any plan or advice "
-    "you already gave is in the conversation above. The worker has now "
-    "hit repeated failures.\n\n"
+    "You are advising the worker on the task below. The opening plan, "
+    "if one was written, and the worker's most recent messages follow. "
+    "The worker has now hit repeated failures.\n\n"
     "# Task\n\n"
     "{task}\n\n"
-    "# What just happened\n\n"
-    "{recent_calls}\n\n"
+    "# Opening plan\n\n"
+    "{plan}\n\n"
+    "# Worker's recent messages\n\n"
+    "{recent_messages}\n\n"
     "# Why you are being asked\n\n"
     "{trigger_note}\n"
     "{severity_note}\n\n"
@@ -159,15 +162,17 @@ FOLLOWUP_REQUEST_TEMPLATE = (
 
 CONSULT_REQUEST_TEMPLATE = (
     "# Consultation {index} of {max_consults}\n\n"
-    "You are advising the worker on the task below. Any plan or advice "
-    "you already gave is in the conversation above. The worker has "
-    "paused to ask you a question of its own accord.\n\n"
+    "You are advising the worker on the task below. The opening plan, "
+    "if one was written, and the worker's most recent messages follow. "
+    "The worker has paused to ask you a question of its own accord.\n\n"
     "# Task\n\n"
     "{task}\n\n"
+    "# Opening plan\n\n"
+    "{plan}\n\n"
     "# The worker's question\n\n"
     "{question}\n\n"
-    "# What the worker did most recently\n\n"
-    "{recent_calls}\n\n"
+    "# Worker's recent messages\n\n"
+    "{recent_messages}\n\n"
     "# Your reply\n\n"
     "Answer the question directly with guidance the worker can act on "
     "now, in under 200 words. If the question reveals a wrong approach, "
@@ -192,10 +197,14 @@ SEVERITY_NOTES = {
 # Closes every notice the agent gets instead of an advisor answer.
 FALLBACK_ADVICE = "Decide with your own best judgment and keep going."
 
+# Formatted with the counts the trigger saw.
 TRIGGER_NOTES = {
-    "consecutive": "Several tool calls in a row have failed.",
-    "window": "Failures keep recurring over the last several steps.",
+    "consecutive": "{failures} tool calls in a row have failed.",
+    "window": "{failures} of the last {window_size} tool calls failed.",
 }
+
+# Shown in place of the plan when none was written.
+NO_PLAN_NOTE = "(no opening plan was written for this conversation)"
 
 # Introduces the workspace listing to the advisor.
 ENV_SECTION_HEADER = (
@@ -209,6 +218,7 @@ __all__ = [
     "ENV_SECTION_HEADER",
     "FALLBACK_ADVICE",
     "FOLLOWUP_REQUEST_TEMPLATE",
+    "NO_PLAN_NOTE",
     "PLAN_REQUEST_TEMPLATE",
     "SEVERITY_NOTES",
     "TRIGGER_NOTES",

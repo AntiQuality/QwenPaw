@@ -27,15 +27,12 @@ from qwenpaw.modes.advisor.middleware import (
     _FOLLOWUP_CALL_ARGS,
     _PLAN_CALL_ARGS,
     _clip,
-    _format_recent,
+    _format_messages,
     _parse_followup,
     _result_text,
     _workspace_listing,
 )
-from qwenpaw.modes.advisor.trigger import (
-    InterventionTrigger,
-    ObservedStep,
-)
+from qwenpaw.modes.advisor.trigger import FailureDetector, InterventionTrigger
 
 FAIL = "Command failed with exit code 1."
 OK = "done"
@@ -113,6 +110,8 @@ def add_result(agent, tool, args, output, call_id=None):
             "Msg",
             (),
             {
+                "role": "assistant",
+                "name": "test-agent",
                 "content": [
                     {
                         "type": "tool_call",
@@ -179,7 +178,7 @@ async def test_advice_is_injected_where_the_agent_can_see_it():
         add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
         await mw._check_and_intervene(agent)
     block = followups(agent)[0]
-    assert block.output == "Stop retrying that. Take another route."
+    assert block.output == "ADJUST\nStop retrying that. Take another route."
     assert agent.state.context[-1].content[0].name == FOLLOWUP_TOOL_NAME
 
 
@@ -213,27 +212,37 @@ async def test_followup_can_be_disabled():
     assert followups(agent) == []
 
 
-# ── statefulness ────────────────────────────────────────────────────────
+# ── self-contained requests ─────────────────────────────────────────────
 
 
-async def test_followups_are_stateful_and_accumulate():
+async def test_followups_carry_the_plan_and_the_recent_messages():
     mw = make_mw(max_interventions=5)
     agent = _Agent()
-    mw._advisor_history = [
-        {"role": "user", "content": "plan req"},
-        {"role": "assistant", "content": "the plan"},
-    ]
+    mw._plan = "THE PLAN"
     for i in range(9):
         add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
         await mw._check_and_intervene(agent)
     calls = mw.advisor.calls
     assert len(calls) >= 2
-    # Every follow-up starts with the system prompt, then the earlier
-    # exchange: the first one sees the plan, later ones see more.
-    assert all(c[0]["role"] == "system" for c in calls)
-    assert calls[0][1:3] == mw._advisor_history[:2]
-    lens = [len(c) for c in calls]
-    assert all(b > a for a, b in zip(lens, lens[1:]))
+    # Every request is one system prompt plus one self-contained message
+    # with the plan and the agent's latest messages.
+    assert all([m["role"] for m in c] == ["system", "user"] for c in calls)
+    for call in calls:
+        assert "THE PLAN" in call[-1]["content"]
+    assert "c8" in calls[-1][-1]["content"]
+
+
+async def test_recent_messages_are_capped_by_the_setting():
+    mw = make_mw()
+    mw._recent_messages = 3  # one call + result pair, plus one result
+    agent = _Agent()
+    for i in range(3):
+        add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
+        await mw._check_and_intervene(agent)
+    request = mw.advisor.calls[0][-1]["content"]
+    assert "c2" in request
+    assert "c1" not in request and "c0" not in request
+    assert request.count("-> FAILED") == 2
 
 
 # ── not double-counting ─────────────────────────────────────────────────
@@ -305,7 +314,7 @@ async def test_cap_is_enforced():
 # ── request contents ────────────────────────────────────────────────────
 
 
-async def test_request_carries_recent_calls_and_severity():
+async def test_request_carries_recent_messages_and_severity():
     mw, agent = make_mw(), _Agent()
     same = {"file_path": "backtest.py"}
     for _ in range(3):
@@ -321,6 +330,7 @@ async def test_request_carries_recent_calls_and_severity():
     assert "write_file" in msg
     assert "backtest.py" in msg
     assert "'content' is a required property" in msg
+    assert "3 tool calls in a row have failed" in msg
     # Identical repeated call => the directive "stuck" wording.
     assert "repeated with identical arguments" in msg
     assert "CONTINUE" in msg and "ADJUST" in msg
@@ -356,18 +366,17 @@ def test_parse_followup(reply, action, body):
     assert _parse_followup(reply) == (action, body)
 
 
-async def test_continue_is_not_injected_but_is_remembered():
+async def test_continue_is_not_injected():
     mw, agent = make_mw(["CONTINUE"]), _Agent()
     for i in range(3):
         add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
         await mw._check_and_intervene(agent)
     assert len(mw.advisor.calls) == 1, "the advisor is still consulted"
     assert followups(agent) == [], "CONTINUE must not reach the agent"
-    assert mw._advisor_history[-1]["content"] == "CONTINUE"
     assert mw.interventions[-1]["action"] == "CONTINUE"
 
 
-async def test_adjust_injects_only_the_body_not_the_verdict_line():
+async def test_adjust_injects_the_whole_reply_with_its_verdict_line():
     mw, agent = (
         make_mw(["ADJUST\nStop using heredocs. Write a file."]),
         _Agent(),
@@ -375,7 +384,10 @@ async def test_adjust_injects_only_the_body_not_the_verdict_line():
     for i in range(3):
         add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
         await mw._check_and_intervene(agent)
-    assert followups(agent)[0].output == "Stop using heredocs. Write a file."
+    assert (
+        followups(agent)[0].output
+        == "ADJUST\nStop using heredocs. Write a file."
+    )
 
 
 async def test_malformed_reply_retries_the_same_request():
@@ -391,7 +403,7 @@ async def test_malformed_reply_retries_the_same_request():
     assert len(mw.advisor.calls) == 3, "retries until the verdict parses"
     sent = {c[-1]["content"] for c in mw.advisor.calls}
     assert len(sent) == 1, "the SAME request is re-asked"
-    assert followups(agent)[0].output == "Do it this way."
+    assert followups(agent)[0].output == "ADJUST\nDo it this way."
 
 
 async def test_persistently_malformed_reply_is_treated_as_adjust():
@@ -599,24 +611,46 @@ def test_result_text_flattens_textblocks():
     assert _result_text({"output": [TextBlock(text="p")]}) == "p"
 
 
-def test_format_recent_marks_failures():
-    out = _format_recent(
-        [
-            ObservedStep(
-                tool="read_file",
-                args={"p": "x"},
-                output="ok",
-                failed=False,
-            ),
-            ObservedStep(
-                tool="execute_shell_command",
-                args={"command": "y"},
-                output=FAIL,
-                failed=True,
-            ),
-        ],
+def test_format_messages_renders_the_latest_entries():
+    agent = _Agent()
+    agent.state.context.append(
+        type("Msg", (), {"role": "system", "content": "SYSTEM RULES"})(),
     )
-    assert "-> ok" in out and "-> FAILED" in out
+    agent.state.context.append(UserMsg(name="user", content="do it"))
+    add_result(agent, "read_file", {"p": "x"}, "ok")
+    add_result(agent, "execute_shell_command", {"command": "y"}, FAIL)
+    out = _format_messages(agent.state.context, 12, FailureDetector())
+    assert "SYSTEM RULES" not in out
+    assert "user: do it" in out
+    assert "worker called read_file(" in out and "-> ok" in out
+    assert "execute_shell_command -> FAILED" in out
+    # Only the last ``limit`` entries are shown: here the final result.
+    out = _format_messages(agent.state.context, 1, FailureDetector())
+    assert "do it" not in out and "read_file" not in out
+    assert out.startswith("execute_shell_command -> FAILED")
+    assert _format_messages([], 12, FailureDetector()) == "(no messages yet)"
+
+
+def test_format_messages_never_marks_the_advisors_answers_as_failed():
+    agent = _Agent()
+    add_result(agent, PLAN_TOOL_NAME, {"question": "q?"}, "Start by failing.")
+    out = _format_messages(agent.state.context, 12, FailureDetector())
+    assert f"advisor ({PLAN_TOOL_NAME}): Start by failing." in out
+    assert "FAILED" not in out
+
+
+def test_format_messages_leaves_the_opening_plan_out():
+    agent = _Agent()
+    add_result(agent, PLAN_TOOL_NAME, _PLAN_CALL_ARGS, "THE PLAN")
+    add_result(agent, PLAN_TOOL_NAME, {"question": "q?"}, "An answer.")
+    out = _format_messages(
+        agent.state.context,
+        12,
+        FailureDetector(),
+        plan="THE PLAN",
+    )
+    assert "THE PLAN" not in out and "how should I approach" not in out
+    assert "worker called consult_advisor(" in out and "An answer." in out
 
 
 def test_extract_instruction_reads_text_blocks():
@@ -685,25 +719,26 @@ def test_extract_instruction_uses_the_latest_user_message():
     )
 
 
-async def test_shared_advisor_history_is_the_same_list():
-    shared = [{"role": "user", "content": "earlier plan request"}]
-    mw = _plan_mw(["THE PLAN"], advisor_history=shared)
+async def test_plan_is_kept_for_the_later_requests():
+    mw = _plan_mw(["THE PLAN"])
+    assert mw.plan == ""
     await mw._inject_plan(_agent_with_task(), tools=[])
-    assert mw.advisor_history is shared
-    assert len(shared) == 3, "the new exchange was appended to the list"
-    # The plan request replayed the earlier exchange to the advisor.
-    assert mw.advisor.calls[0][1]["content"] == "earlier plan request"
+    assert mw.plan == "THE PLAN"
+    # A middleware built for a later turn starts with the plan in hand.
+    later = _plan_mw(["x"], plan="THE PLAN", plan_injected=True)
+    assert later.plan == "THE PLAN" and later.plan_injected
 
 
 # ── on-demand consultation ──────────────────────────────────────────────
 
 
-async def test_consult_answers_with_recent_calls_and_counts_budget():
+async def test_consult_answers_and_counts_the_budget():
     mw, agent = (
         make_mw(["Try the other route."], max_interventions=9),
         _Agent(),
     )
     mw._max_consults = 2
+    mw._plan = "THE PLAN"
     add_result(agent, "execute_shell_command", {"command": "make"}, FAIL)
     await mw._check_and_intervene(agent)  # one failure observed
     reply = await mw.consult("Should I keep building or switch to X?")
@@ -712,11 +747,9 @@ async def test_consult_answers_with_recent_calls_and_counts_budget():
     request = mw.advisor.calls[-1][-1]["content"]
     assert "Consultation 1 of 2" in request
     assert "Should I keep building or switch to X?" in request
-    assert "make" in request and "FAILED" in request, "recent calls attached"
+    assert "THE PLAN" in request
     assert mw.consults[-1]["question"].startswith("Should I")
     assert mw.consults[-1]["reply"] == "Try the other route."
-    # The exchange is remembered for later follow-ups.
-    assert mw._advisor_history[-1]["content"] == "Try the other route."
 
 
 async def test_consult_budget_exhaustion_returns_notice_without_a_call():
@@ -779,13 +812,16 @@ async def test_plan_can_be_switched_off_while_interventions_stay():
     ), "the follow-up carries the task itself, since no plan exists"
 
 
-async def test_consult_request_carries_the_task():
-    mw = _plan_mw(["answer"])
+async def test_consult_request_carries_the_task_plan_and_recent_messages():
+    mw = _plan_mw(["THE PLAN", "answer"])
     agent = _agent_with_task("write report.md")
     await mw.on_model_call(agent, {"messages": []}, _next_handler)  # plan
+    add_result(agent, "execute_shell_command", {"command": "pandoc"}, FAIL)
     await mw.consult("which format?")
     request = mw.advisor.calls[-1][-1]["content"]
     assert "write report.md" in request and "which format?" in request
+    assert "# Opening plan\n\nTHE PLAN" in request
+    assert "pandoc" in request and "-> FAILED" in request
 
 
 async def test_agents_without_the_hook_are_fine():
@@ -929,13 +965,13 @@ async def test_followup_continue_is_shown_but_not_injected():
     assert _streamed(agent) == "CONTINUE\nLooks fine, carry on."
 
 
-async def test_followup_adjust_streams_and_injects_the_body():
+async def test_followup_adjust_streams_and_injects_the_reply():
     mw = make_mw(["ADJUST\nSwitch."])
     agent = _LiveAgent()
     for i in range(3):
         add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
         await mw._check_and_intervene(agent)
-    assert [f.output for f in followups(agent)] == ["Switch."]
+    assert [f.output for f in followups(agent)] == ["ADJUST\nSwitch."]
     assert _streamed(agent) == "ADJUST\nSwitch."
     call_id = agent.events[0].tool_call_id
     assert agent.state.context[-1].content[0].id == call_id
@@ -986,18 +1022,15 @@ async def test_consult_stream_reports_a_failed_advisor_call():
     assert len(pieces) == 1 and "could not be reached" in pieces[0]
 
 
-async def test_rejected_followup_samples_do_not_enter_the_history():
+async def test_followup_without_a_verdict_is_asked_again():
     mw = make_mw(["no verdict here", "ADJUST\nSwitch."])
     agent = _Agent()
     for i in range(3):
         add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
         await mw._check_and_intervene(agent)
-    assert [f.output for f in followups(agent)] == ["Switch."]
+    assert [f.output for f in followups(agent)] == ["ADJUST\nSwitch."]
     assert len(mw.advisor.calls) == 2, "re-asked once"
-    assistant_turns = [
-        m for m in mw.advisor_history if m["role"] == "assistant"
-    ]
-    assert [m["content"] for m in assistant_turns] == ["ADJUST\nSwitch."]
+    assert mw.interventions[-1]["advice"] == "ADJUST\nSwitch."
 
 
 def test_advisor_never_sees_its_own_tool():

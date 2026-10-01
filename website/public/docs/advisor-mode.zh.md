@@ -3,8 +3,8 @@
 顾问模式让两个模型协作完成同一个任务：一个更强的**顾问**（advisor），和真正干活的 **Worker**（智能体本身）。
 
 - 在智能体于一个会话中迈出第一步之前，顾问先为任务写一份策略性计划。计划以一对 `consult_advisor` 工具调用 + 结果的形式注入到智能体的上下文中，智能体会把它当作自己主动询问得到的回答。
-- 智能体工作期间，顾问模式会持续观察它的工具结果。当智能体反复失败（连续多次失败，或最近几步里失败反复出现）时，顾问会带着最近的调用记录被再次咨询。它回复 **CONTINUE**（不注入任何内容）或 **ADJUST** 加一段简短的修正计划，后者以 `consult_advisor_followup` 调用的形式注入。
-- 智能体也可以主动提问：顾问模式下 `consult_advisor` 是一个真实的工具。工具描述告诉智能体只在真正的决策点使用它（在投入代价高昂的路线之前，或不确定是否该放弃某个方案时），而不是每一步都问。顾问用自由文本作答，并自动附带智能体最近的调用记录。这次问答与开场计划、自动介入共享同一段顾问对话。
+- 智能体工作期间，顾问模式会持续观察它的工具结果。当智能体反复失败（连续多次失败，或最近几步里失败反复出现）时，顾问会被再次咨询。它回复 **CONTINUE**（不注入任何内容）或 **ADJUST** 加一段简短的修正计划，后者以 `consult_advisor_followup` 调用的形式注入。
+- 智能体也可以主动提问：顾问模式下 `consult_advisor` 是一个真实的工具。工具描述告诉智能体只在真正的决策点使用它（在投入代价高昂的路线之前，或不确定是否该放弃某个方案时），而不是每一步都问。顾问用自由文本作答。每次发给顾问的请求都带有任务、开场计划和智能体最近的消息，所以顾问看到的是智能体实际做过的事。
 
 更强的模型每个任务只被调用几次，便宜的模型负责跑每一步。
 
@@ -50,7 +50,7 @@
 
 对话级的开关和 Goal、自定义循环模式一样保存在内存里：QwenPaw 重启后，对话会回到默认循环（顾问对之前计划的记忆也会清空），需要重新选择顾问。智能体级的开关以及顾问模板里的其它设置都保存在 `agent.json` 中，重启后仍然有效。
 
-**API**：`GET /api/advisor-mode` 读取状态（各开关、实际生效的模型和它们回退到的默认槽位）。`POST /api/advisor-mode` 传 `{"enabled": true}`、`{"plan_enabled": false}`、`{"followup_enabled": false}`、`{"on_demand_enabled": false}`、`{"max_consults": 5}`、`{"advisor_model": {"provider_id": "…", "model": "…"}}`、`{"worker_model": null}` 或 `{"advisor_thinking": "off"}` 中的任意字段更新。未传的字段保持不变，`null` 表示清除该模型覆盖。
+**API**：`GET /api/advisor-mode` 读取状态（各开关、实际生效的模型和它们回退到的默认槽位）。`POST /api/advisor-mode` 传 `{"enabled": true}`、`{"plan_enabled": false}`、`{"followup_enabled": false}`、`{"on_demand_enabled": false}`、`{"max_consults": 5}`、`{"recent_messages": 8}`、`{"advisor_model": {"provider_id": "…", "model": "…"}}`、`{"worker_model": null}` 或 `{"advisor_thinking": "off"}` 中的任意字段更新。未传的字段保持不变，`null` 表示清除该模型覆盖。
 
 设置按智能体保存在 `agent.json` 中：
 
@@ -62,6 +62,7 @@
     "followup_enabled": true,
     "on_demand_enabled": true,
     "max_consults": 32,
+    "recent_messages": 20,
     "intervention": {
       "consecutive_failures": 3,
       "window_size": 10,
@@ -76,7 +77,7 @@
 }
 ```
 
-`max_consults` 限制智能体每个对话里主动提问的次数（默认 32 次）。超出后工具返回一句简短提示，智能体继续自行处理。自动介入另有上限（`max_interventions`，见下文）。关闭开场计划后，顾问只会通过自动介入或智能体（`consult_advisor`）被召唤。介入和咨询请求里始终带有任务本身，因此没有计划也能正常工作。
+`max_consults` 限制智能体每个对话里主动提问的次数（默认 32 次）。超出后工具返回一句简短提示，智能体继续自行处理。自动介入另有上限（`max_interventions`，见下文）。关闭开场计划后，顾问只会通过自动介入或智能体（`consult_advisor`）被召唤。介入和咨询请求里始终带有任务本身，因此没有计划也能正常工作。`recent_messages` 决定每次介入或咨询时顾问能看到智能体最近多少条消息（默认 20 条，每段文字、每次工具调用和每个工具结果各算一条，过长的会被裁剪）。
 
 顾问模式可以与 Coding Mode 叠加使用。它本身是一个循环模式，所以一个对话要么处于顾问模式，要么处于其它循环模式（`/goal`、mission、自定义循环），不能同时。
 

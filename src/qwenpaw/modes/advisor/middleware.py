@@ -17,19 +17,18 @@ result pair so the agent reads them as something it asked for:
 
 2. **Mid-run intervention.** Every later model call feeds the tool results
    that accumulated in context to :class:`InterventionTrigger`. When the
-   agent is stuck (repeated failures) the advisor is consulted again with
-   the recent calls and answers CONTINUE or ADJUST. Only an ADJUST body is
-   injected, as a ``consult_advisor_followup`` pair.
+   agent is stuck (repeated failures) the advisor is consulted again and
+   answers CONTINUE or ADJUST. Only an ADJUST reply is injected, as a
+   ``consult_advisor_followup`` pair.
 
 3. **On-demand consultation.** :meth:`consult_stream` answers a question
    the agent asks through the real ``consult_advisor`` tool (see
-   ``tools.py``), with the same advisor and the recent calls attached.
+   ``tools.py``).
 
-The advisor conversation (``advisor_history``) is shared across the turns
-of one chat session, so every request is answered in light of the plan
-and advice already given. The plan is written once per conversation:
-later user turns rely on the mid-run intervention and on the agent's own
-questions, which always carry the current task.
+Every request to the advisor is self-contained: the task, the opening
+plan and the agent's latest messages (clipped), so each call costs about
+the same however long the run gets. The plan is written once per
+conversation and carried over to its later turns.
 """
 from __future__ import annotations
 
@@ -67,12 +66,13 @@ from .prompts import (
     CONSULT_REQUEST_TEMPLATE,
     ENV_SECTION_HEADER,
     FOLLOWUP_REQUEST_TEMPLATE,
+    NO_PLAN_NOTE,
     PLAN_REQUEST_TEMPLATE,
     SEVERITY_NOTES,
     TRIGGER_NOTES,
 )
 from .tools import CONSULT_TOOL_NAME
-from .trigger import InterventionTrigger, ObservedStep, TriggerEvent
+from .trigger import FailureDetector, InterventionTrigger, TriggerEvent
 
 if TYPE_CHECKING:
     from agentscope.agent import Agent
@@ -111,6 +111,7 @@ CONSULT_BUDGET_EXHAUSTED = (
 _PLAN_CALL_ARGS = {
     "question": "Before I start, how should I approach this task?",
 }
+_PLAN_CALL_ARGS_JSON = json.dumps(_PLAN_CALL_ARGS)
 _FOLLOWUP_CALL_ARGS = {
     "question": "My recent steps keep failing. What should I do instead?",
 }
@@ -207,21 +208,73 @@ def _parse_followup(reply: str) -> tuple[str, str]:
     return "", ""
 
 
-def _format_recent(recent: list[ObservedStep]) -> str:
-    if not recent:
-        return "(no recent calls recorded)"
-    lines = []
-    for i, step in enumerate(recent, 1):
-        try:
-            args = json.dumps(step.args, ensure_ascii=False, default=str)
-        except Exception:
-            args = str(step.args)
-        status = "FAILED" if step.failed else "ok"
-        lines.append(
-            f"{i}. {step.tool}({_clip(args, _MAX_ARGS_CHARS)}) -> {status}\n"
-            f"   {_clip(step.output, _MAX_OUTPUT_CHARS)}",
-        )
-    return "\n\n".join(lines)
+def _format_messages(
+    context: list[Msg],
+    limit: int,
+    detector: FailureDetector,
+    plan: str = "",
+) -> str:
+    """Render the agent's latest context for the advisor: what the user
+    and the worker said, the tool calls the worker made and how each
+    turned out. Every text, tool call and tool result is one entry and
+    the last ``limit`` entries are kept. The opening plan is left out,
+    since the request carries it in full."""
+    entries: list[str] = []
+    for msg in reversed(context):
+        role = getattr(msg, "role", "") or ""
+        if role == "system":
+            continue
+        who = "user" if role == "user" else "worker"
+        content = getattr(msg, "content", "")
+        if isinstance(content, str):
+            blocks: list[Any] = [{"type": "text", "text": content}]
+        elif isinstance(content, list):
+            blocks = content
+        else:
+            continue
+        for block in reversed(blocks):
+            entry = _format_block(block, who, detector, plan)
+            if entry:
+                entries.append(entry)
+            if len(entries) >= limit:
+                break
+        if len(entries) >= limit:
+            break
+    entries.reverse()
+    return "\n".join(entries) if entries else "(no messages yet)"
+
+
+def _format_block(
+    block: Any,
+    who: str,
+    detector: FailureDetector,
+    plan: str,
+) -> str:
+    """One entry of :func:`_format_messages`, empty for blocks it skips."""
+    btype = _block_get(block, "type")
+    entry = ""
+    if btype == "text":
+        text = str(_block_get(block, "text", "") or "").strip()
+        if text:
+            entry = f"{who}: {_clip(text, _MAX_OUTPUT_CHARS)}"
+    elif btype == "tool_call":
+        name = _block_get(block, "name") or "unknown"
+        raw = _block_get(block, "input")
+        if not isinstance(raw, str):
+            raw = json.dumps(raw, ensure_ascii=False, default=str)
+        if name != PLAN_TOOL_NAME or raw != _PLAN_CALL_ARGS_JSON:
+            entry = f"{who} called {name}({_clip(raw, _MAX_ARGS_CHARS)})"
+    elif btype == "tool_result":
+        name = _block_get(block, "name") or "unknown"
+        output = _result_text(block)
+        clipped = _clip(output, _MAX_OUTPUT_CHARS)
+        if not name.startswith(PLAN_TOOL_NAME):
+            status = "FAILED" if detector.classify(name, output) else "ok"
+            entry = f"{name} -> {status}\n  {clipped}"
+        elif not plan or output != plan:
+            # The advisor's own earlier answers.
+            entry = f"advisor ({name}): {clipped}"
+    return entry
 
 
 def _workspace_listing(
@@ -456,12 +509,13 @@ class AdvisorMiddleware(MiddlewareBase):
         log_dir: Path | str | None = None,
         session_id: str = "",
         agent_id: str = "",
-        advisor_history: list[dict[str, str]] | None = None,
         plan_enabled: bool = True,
         on_demand_enabled: bool = True,
         max_consults: int = AdvisorModeConfig().max_consults,
         consults_used: int = 0,
         plan_injected: bool = False,
+        plan: str = "",
+        recent_messages: int = AdvisorModeConfig().recent_messages,
     ) -> None:
         self._advisor = advisor
         self._followup_enabled = followup_enabled
@@ -469,8 +523,12 @@ class AdvisorMiddleware(MiddlewareBase):
         self._on_demand_enabled = on_demand_enabled
         # The latest user instruction, kept for follow-up and consult
         # requests so they stay self-contained even without an opening
-        # plan in the advisor history.
+        # plan.
         self._task = ""
+        # The agent's context, kept so an on-demand consultation can show
+        # the advisor the latest messages too.
+        self._context: list[Msg] = []
+        self._recent_messages = max(1, int(recent_messages))
         self._trigger = trigger or InterventionTrigger()
         self._env_context_root = env_context_root
         self._log_dir = Path(log_dir) if log_dir else None
@@ -481,18 +539,14 @@ class AdvisorMiddleware(MiddlewareBase):
 
         # True when an earlier request of the same conversation already
         # put the plan in context: this request then skips the opening
-        # plan and goes straight to watching the agent.
+        # plan and goes straight to watching the agent. The plan text is
+        # carried over with it, for the later requests to the advisor.
         self._plan_injected = plan_injected
+        self._plan = plan
         # Set when every plan attempt failed, so the run can report that it
         # went ahead without one instead of looking like a normal advisor
         # run.
         self._plan_error: str | None = None
-        # The advisor conversation. Shared with the other requests of the
-        # same chat session when the caller passes the session's list, so
-        # follow-ups keep earlier plans in view.
-        self._advisor_history: list[dict[str, str]] = (
-            advisor_history if advisor_history is not None else []
-        )
         # tool_result block ids already fed to the trigger.
         self._seen_result_ids: set[str] = set()
         self._baselined = False
@@ -512,6 +566,11 @@ class AdvisorMiddleware(MiddlewareBase):
     def plan_injected(self) -> bool:
         """Whether the opening plan has reached the agent's context."""
         return self._plan_injected
+
+    @property
+    def plan(self) -> str:
+        """The opening plan, empty when none was written."""
+        return self._plan
 
     @property
     def plan_error(self) -> str | None:
@@ -553,11 +612,6 @@ class AdvisorMiddleware(MiddlewareBase):
         """How many on-demand consultations remain."""
         return max(0, self._max_consults - self._consults_used)
 
-    @property
-    def advisor_history(self) -> list[dict[str, str]]:
-        """The shared advisor conversation (same list object)."""
-        return self._advisor_history
-
     # ── middleware hook ─────────────────────────────────────────────────
 
     async def on_model_call(
@@ -573,6 +627,7 @@ class AdvisorMiddleware(MiddlewareBase):
             # intervention now.
             self._mark_existing_results_seen(agent.state.context)
             self._baselined = True
+        self._context = agent.state.context
         self._task = (
             self._extract_instruction(agent.state.context) or self._task
         )
@@ -594,10 +649,6 @@ class AdvisorMiddleware(MiddlewareBase):
             # ones are scanned here. ``on_acting`` wraps tool execution
             # only and never sees schema-validation failures.
             injected = await self._check_and_intervene(agent)
-        else:
-            # Keep the recent-steps window current for on-demand consults
-            # even when automatic intervention is switched off.
-            self._consume_new_results(agent.state.context)
 
         if injected is not None:
             # ``messages`` was assembled from the context *before* this hook
@@ -642,7 +693,8 @@ class AdvisorMiddleware(MiddlewareBase):
             index=self._consults_used,
             max_consults=self._max_consults,
             question=question,
-            recent_calls=_format_recent(self._trigger.recent),
+            plan=self._plan or NO_PLAN_NOTE,
+            recent_messages=self._recent_context(self._context),
         )
         record: dict[str, Any] = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -651,11 +703,7 @@ class AdvisorMiddleware(MiddlewareBase):
             "request": request,
         }
         try:
-            reply = await self._call_advisor(
-                request,
-                stateful=True,
-                on_text=on_text,
-            )
+            reply = await self._call_advisor(request, on_text=on_text)
         except Exception as exc:
             logger.error(
                 "AdvisorMiddleware: on-demand advisor call failed: %s",
@@ -812,12 +860,17 @@ class AdvisorMiddleware(MiddlewareBase):
         agent: "Agent",
         event: TriggerEvent,
     ) -> Msg | None:
+        trigger_note = TRIGGER_NOTES.get(event.reason, event.reason).format(
+            failures=event.failures,
+            window_size=event.window_size,
+        )
         request = FOLLOWUP_REQUEST_TEMPLATE.format(
             task=self._task or "(not available)",
             index=event.intervention_index,
             max_interventions=self._trigger.config.max_interventions,
-            recent_calls=_format_recent(event.recent),
-            trigger_note=TRIGGER_NOTES.get(event.reason, event.reason),
+            plan=self._plan or NO_PLAN_NOTE,
+            recent_messages=self._recent_context(agent.state.context),
+            trigger_note=trigger_note,
             severity_note=SEVERITY_NOTES.get(event.severity, ""),
         )
         record: dict[str, Any] = {
@@ -846,7 +899,6 @@ class AdvisorMiddleware(MiddlewareBase):
             try:
                 advice = await self._call_advisor(
                     request,
-                    stateful=True,
                     on_text=live.on_text if live.active else None,
                 )
             except Exception as exc:
@@ -868,9 +920,6 @@ class AdvisorMiddleware(MiddlewareBase):
                 _FOLLOWUP_FORMAT_ATTEMPTS,
             )
             if attempt < _FOLLOWUP_FORMAT_ATTEMPTS:
-                # The rejected sample must not shape the next answer (or
-                # later consultations): drop it from the advisor history.
-                del self._advisor_history[-2:]
                 live.note("(no CONTINUE/ADJUST verdict, asking again)")
         else:
             # Still unparseable: treat as ADJUST rather than drop the
@@ -887,7 +936,7 @@ class AdvisorMiddleware(MiddlewareBase):
         self._record_intervention(record)
 
         # CONTINUE carries no new instruction, so nothing is put in front
-        # of the agent. The advisor still has it in its history.
+        # of the agent.
         if action == _CONTINUE:
             logger.info(
                 "AdvisorMiddleware: advisor said %s, nothing injected",
@@ -903,11 +952,13 @@ class AdvisorMiddleware(MiddlewareBase):
             live.finish(advice)
             return None
 
+        # The verdict line stays on the injected result, so the agent and
+        # the chat history read the same reply the advisor gave.
         msg = _exchange_msg(
             agent.name,
             FOLLOWUP_TOOL_NAME,
             _FOLLOWUP_CALL_ARGS,
-            body,
+            advice.strip(),
             call_id=call_id,
         )
         agent.state.context.append(msg)
@@ -960,7 +1011,6 @@ class AdvisorMiddleware(MiddlewareBase):
             try:
                 plan = await self._call_advisor(
                     plan_request,
-                    stateful=True,
                     on_text=live.on_text if live.active else None,
                 )
                 break
@@ -994,6 +1044,7 @@ class AdvisorMiddleware(MiddlewareBase):
             len(plan),
         )
         self._record_plan(plan_request, plan=plan)
+        self._plan = plan
 
         msg = _exchange_msg(
             agent.name,
@@ -1011,27 +1062,24 @@ class AdvisorMiddleware(MiddlewareBase):
     async def _call_advisor(
         self,
         message: str,
-        stateful: bool = False,
         on_text: Callable[[str], None] | None = None,
     ) -> str:
-        """Ask the advisor.
-
-        With ``stateful=True`` the earlier exchange is replayed first, so
-        the question is answered in light of the plans already given (and
-        any advice already offered) instead of from a blank slate.
-        ``on_text`` receives the cumulative reply while it streams.
-        """
+        """Ask the advisor one self-contained question. ``on_text``
+        receives the cumulative reply while it streams."""
         messages: list[dict[str, str]] = [
             {"role": "system", "content": ADVISOR_SYSTEM_PROMPT},
+            {"role": "user", "content": message},
         ]
-        if stateful:
-            messages.extend(self._advisor_history)
-        messages.append({"role": "user", "content": message})
-        reply = await self._advisor.ask(messages, on_text=on_text)
-        # Remember the exchange so later questions build on it.
-        self._advisor_history.append({"role": "user", "content": message})
-        self._advisor_history.append({"role": "assistant", "content": reply})
-        return reply
+        return await self._advisor.ask(messages, on_text=on_text)
+
+    def _recent_context(self, context: list[Msg]) -> str:
+        """The agent's latest messages, as the advisor sees them."""
+        return _format_messages(
+            context,
+            self._recent_messages,
+            self._trigger.detector,
+            plan=self._plan,
+        )
 
     # ── transcript persistence ──────────────────────────────────────────
 

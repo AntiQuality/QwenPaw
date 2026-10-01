@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Iterable
 
 from ...config.config import AdvisorInterventionConfig
@@ -173,8 +173,7 @@ class FailureDetector:
 
 @dataclass
 class ObservedStep:
-    """One tool call and how it turned out — the payload sent to the
-    advisor."""
+    """One tool call and how it turned out."""
 
     tool: str
     args: Any
@@ -192,7 +191,8 @@ class TriggerEvent:
     severity: str  # "stuck" (repeating itself) | "struggling"
     step_index: int
     intervention_index: int  # 1-based
-    recent: list[ObservedStep] = field(default_factory=list)
+    failures: int  # failed calls that set it off
+    window_size: int  # steps the failure window spanned
 
 
 class InterventionTrigger:
@@ -229,11 +229,6 @@ class InterventionTrigger:
     def exhausted(self) -> bool:
         """Whether the intervention budget is used up."""
         return self._interventions >= self.config.max_interventions
-
-    @property
-    def recent(self) -> list[ObservedStep]:
-        """The last few observed steps, oldest first."""
-        return list(self._recent)
 
     def reset_counters(self) -> None:
         """Forget the current run of failures.
@@ -293,10 +288,13 @@ class InterventionTrigger:
             return None
 
         reason = ""
+        failures = 0
         if self._consecutive >= cfg.consecutive_failures:
             reason = "consecutive"
+            failures = self._consecutive
         elif sum(self._window) >= cfg.window_failures:
             reason = "window"
+            failures = sum(self._window)
         if not reason:
             return None
 
@@ -305,7 +303,8 @@ class InterventionTrigger:
             severity="stuck" if self._repeating() else "struggling",
             step_index=self._steps_seen - 1,
             intervention_index=self._interventions + 1,
-            recent=list(self._recent),
+            failures=failures,
+            window_size=len(self._window),
         )
         # Clear both counters so the next fire needs fresh evidence.
         self._consecutive = 0

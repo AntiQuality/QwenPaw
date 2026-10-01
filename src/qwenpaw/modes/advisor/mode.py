@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 
 from agentscope.message import Msg, TextBlock
@@ -59,15 +59,13 @@ class AdvisorSessionState:
 
     ``override`` is the per-conversation switch (set by ``/advisor``): it
     takes precedence over the agent's default from ``agent.json``.
-    ``advisor_history`` is the advisor conversation, and ``middleware`` the
-    instance serving the request in flight (looked up by the
-    ``consult_advisor`` tool). Whether the opening plan has been written
-    is read off that instance too, so the plan happens once per
-    conversation rather than once per user turn.
+    ``middleware`` is the instance serving the request in flight (looked
+    up by the ``consult_advisor`` tool). The opening plan and whether it
+    has been written are read off that instance too, so the plan happens
+    once per conversation rather than once per user turn.
     """
 
     override: bool | None = None
-    advisor_history: list[dict[str, str]] = field(default_factory=list)
     middleware: AdvisorMiddleware | None = None
 
     @property
@@ -79,6 +77,11 @@ class AdvisorSessionState:
     def plan_injected(self) -> bool:
         """Whether the opening plan already reached this conversation."""
         return bool(self.middleware and self.middleware.plan_injected)
+
+    @property
+    def plan(self) -> str:
+        """The opening plan of this conversation, if one was written."""
+        return self.middleware.plan if self.middleware else ""
 
 
 class AdvisorMode(AgentMode):
@@ -135,7 +138,7 @@ class AdvisorMode(AgentMode):
         return state.middleware if state is not None else None
 
     async def on_conversation_reset(self, ctx: HookContext) -> None:
-        """Forget the conversation's switch and advisor history on
+        """Forget the conversation's switch and opening plan on
         ``/new`` and ``/clear``."""
         key = self._session_key(ctx)
         if key and self._sessions.pop(key, None) is not None:
@@ -204,9 +207,8 @@ class AdvisorMode(AgentMode):
     ) -> AdvisorMiddleware:
         """Build the request-scoped :class:`AdvisorMiddleware`.
 
-        The advisor conversation, the on-demand budget and the fact that
-        the opening plan has been written carry over from the earlier
-        requests of the same chat session.
+        The opening plan and the on-demand budget carry over from the
+        earlier requests of the same chat session.
         """
         agent_id = (
             getattr(cfg, "id", None) or getattr(ctx, "agent_id", None) or ""
@@ -238,7 +240,8 @@ class AdvisorMode(AgentMode):
             max_consults=am.max_consults,
             consults_used=state.consults_used,
             plan_injected=state.plan_injected,
-            advisor_history=state.advisor_history,
+            plan=state.plan,
+            recent_messages=am.recent_messages,
             env_context_root=env_root,
             log_dir=default_log_dir(agent_id),
             session_id=session_id,

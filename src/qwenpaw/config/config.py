@@ -2165,6 +2165,15 @@ class AdvisorModeConfig(BaseModel):
         ge=0,
         description="Maximum on-demand consultations per conversation",
     )
+    recent_messages: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "How many of the agent's latest messages the advisor sees at "
+            "each intervention or consultation. Every text, tool call and "
+            "tool result counts as one"
+        ),
+    )
     intervention: AdvisorInterventionConfig = Field(
         default_factory=AdvisorInterventionConfig,
         description="Thresholds for the mid-run auto intervention",

@@ -36,6 +36,7 @@ def test_round_trips_through_json():
         "followup_enabled": False,
         "on_demand_enabled": True,
         "max_consults": 32,
+        "recent_messages": 20,
         "intervention": {
             "consecutive_failures": 3,
             "window_size": 10,
