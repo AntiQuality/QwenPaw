@@ -110,6 +110,17 @@ def _with_thinking(agent_config: Any, thinking: str) -> Any:
     return agent_config
 
 
+def _usage_counts(response: Any) -> dict[str, int] | None:
+    """Input and output token counts of a model response, if reported."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    return {
+        "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
+        "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
+    }
+
+
 class AdvisorClient:
     """Lazily build the advisor model and answer chat-style requests."""
 
@@ -128,6 +139,8 @@ class AdvisorClient:
         # separate from the agent's.
         self._thinking = thinking or "inherit"
         self._model: Any = None
+        # Token counts of the last call, when the provider reported them.
+        self.last_usage: dict[str, int] | None = None
 
     @property
     def label(self) -> str:
@@ -176,13 +189,16 @@ class AdvisorClient:
             )
             for m in messages
         ]
+        self.last_usage = None
         response = await model(msgs)
         if not isinstance(response, AsyncIterable):
+            self.last_usage = _usage_counts(response)
             return extract_response_text(response)
         # Streamed chunks carry the cumulative text, the last non-empty
-        # one wins.
+        # one wins. Token counts arrive with the final chunks.
         text = ""
         async for chunk in response:
+            self.last_usage = _usage_counts(chunk) or self.last_usage
             chunk_text = extract_response_text(chunk)
             if chunk_text:
                 text = chunk_text

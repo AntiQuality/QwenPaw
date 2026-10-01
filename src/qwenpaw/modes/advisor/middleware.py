@@ -680,9 +680,10 @@ class AdvisorMiddleware(MiddlewareBase):
 
         The reply is returned to the agent as the tool result (the toolkit
         records it in context, so nothing is injected here). Consultations
-        are capped per conversation. Past the cap a fixed notice is
-        returned instead of an advisor call. ``on_text`` receives the
-        cumulative reply while the advisor is still writing it.
+        are capped per conversation and every answer ends with how many
+        are left. Past the cap a fixed notice is returned instead of an
+        advisor call. ``on_text`` receives the cumulative reply while the
+        advisor is still writing it.
         """
         question = (question or "").strip()
         if not question:
@@ -724,6 +725,7 @@ class AdvisorMiddleware(MiddlewareBase):
                 f"{FALLBACK_ADVICE}"
             )
         record["reply"] = reply
+        record["usage"] = self._usage()
         self._record_consult(record)
         # The agent just asked, so do not count the same run of failures
         # towards an automatic intervention on top of that.
@@ -735,7 +737,10 @@ class AdvisorMiddleware(MiddlewareBase):
             self._max_consults,
             len(reply),
         )
-        return reply.strip() or "(the advisor had nothing to add)"
+        text = reply.strip() or "(the advisor had nothing to add)"
+        left = self.consults_left
+        noun = "consultation" if left == 1 else "consultations"
+        return f"{text}\n\n({left} {noun} left)"
 
     async def consult_stream(self, question: str) -> AsyncIterator[str]:
         """:meth:`consult`, delivered as text deltas while the advisor
@@ -940,7 +945,9 @@ class AdvisorMiddleware(MiddlewareBase):
                 _ADJUST,
             )
 
-        record.update({"action": action, "advice": advice})
+        record.update(
+            {"action": action, "advice": advice, "usage": self._usage()},
+        )
         self._record_intervention(record)
 
         # CONTINUE carries no new instruction, so nothing is put in front
@@ -1051,7 +1058,7 @@ class AdvisorMiddleware(MiddlewareBase):
             "context",
             len(plan),
         )
-        self._record_plan(plan_request, plan=plan)
+        self._record_plan(plan_request, plan=plan, usage=self._usage())
         self._plan = plan
 
         msg = _exchange_msg(
@@ -1117,14 +1124,20 @@ class AdvisorMiddleware(MiddlewareBase):
         request: str,
         plan: str | None = None,
         error: str | None = None,
+        usage: dict[str, int] | None = None,
     ) -> None:
         self._transcript["plan"] = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "request": request,
             "plan": plan,
             "error": error,
+            "usage": usage,
         }
         self._save_transcript()
+
+    def _usage(self) -> dict[str, int] | None:
+        """Token counts of the last advisor call, when reported."""
+        return getattr(self._advisor, "last_usage", None)
 
     def _record_intervention(self, record: dict[str, Any]) -> None:
         self._transcript["interventions"].append(record)

@@ -766,7 +766,7 @@ async def test_consult_answers_and_counts_the_budget():
     add_result(agent, "execute_shell_command", {"command": "make"}, FAIL)
     await mw._check_and_intervene(agent)  # one failure observed
     reply = await mw.consult("Should I keep building or switch to X?")
-    assert reply == "Try the other route."
+    assert reply == "Try the other route.\n\n(1 consultation left)"
     assert mw.consults_used == 1 and mw.consults_left == 1
     request = mw.advisor.calls[-1][-1]["content"]
     assert "Consultation 1 of 2" in request
@@ -779,7 +779,7 @@ async def test_consult_answers_and_counts_the_budget():
 async def test_consult_budget_exhaustion_returns_notice_without_a_call():
     mw = make_mw(["ok"])
     mw._max_consults = 1
-    assert await mw.consult("q1") == "ok"
+    assert await mw.consult("q1") == "ok\n\n(0 consultations left)"
     assert await mw.consult("q2") == CONSULT_BUDGET_EXHAUSTED
     assert len(mw.advisor.calls) == 1
     assert mw.consults_left == 0
@@ -805,6 +805,26 @@ async def test_consult_empty_question_and_advisor_failure():
     assert "could not be reached" in reply
     assert "down" in mw.consults[-1]["error"]
     assert mw.consults_used == 1, "a failed call still spends the budget"
+
+
+async def test_token_counts_are_recorded_when_reported():
+    counts = {"input_tokens": 10, "output_tokens": 5}
+    mw = _plan_mw(["THE PLAN"])
+    mw.advisor.last_usage = counts
+    await mw._inject_plan(_agent_with_task(), tools=[])
+    plan_record = mw._transcript.get("plan") or {}
+    assert plan_record["usage"] == counts
+    mw, agent = make_mw(["CONTINUE"]), _Agent()
+    mw.advisor.last_usage = counts
+    for i in range(3):
+        add_result(agent, "execute_shell_command", {"command": f"c{i}"}, FAIL)
+        await mw._check_and_intervene(agent)
+    assert mw.interventions[-1]["usage"] == counts
+    await mw.consult("q")
+    assert mw.consults[-1]["usage"] == counts
+    mw = make_mw(["answer"])
+    await mw.consult("q")
+    assert mw.consults[-1]["usage"] is None, "nothing reported"
 
 
 async def test_consults_are_persisted_in_the_transcript(tmp_path):
@@ -1014,7 +1034,10 @@ async def test_consult_stream_yields_the_reply_in_pieces():
     await mw.on_model_call(agent, {"messages": []}, _next_handler)  # plan
     pieces = await _pieces(mw, "which route?")
     assert len(pieces) >= 2, "streamed, not delivered in one go"
-    assert "".join(pieces) == "Take the other route, it is shorter."
+    assert (
+        "".join(pieces)
+        == "Take the other route, it is shorter.\n\n(31 consultations left)"
+    )
     assert mw.consults_left == 32 - 1, "counted once"
     assert "which route?" in mw.advisor.calls[-1][-1]["content"]
 
@@ -1037,7 +1060,7 @@ async def test_consult_stream_without_advisor_streaming():
     mw = make_mw(["x"])
     mw._advisor = _PlainAdvisor()
     pieces = await _pieces(mw, "q?")
-    assert "".join(pieces) == "whole answer", "stripped like consult()"
+    assert "".join(pieces) == "whole answer\n\n(31 consultations left)"
 
 
 async def test_consult_stream_reports_a_failed_advisor_call():

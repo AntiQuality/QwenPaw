@@ -77,7 +77,7 @@ The setting is stored per agent in `agent.json`:
 }
 ```
 
-`max_consults` caps the agent's own questions per conversation (default 32). Past the cap the tool answers with a short notice and the agent carries on. Automatic interventions have their own cap (`max_interventions`, see below). With the opening plan switched off, the advisor is only consulted automatically (auto intervention) or by the agent (`consult_advisor`). The follow-up and consultation requests always carry the task itself, so they work without a plan. `recent_messages` sets how many of the agent's latest messages the advisor sees at each intervention or consultation (default 20, every text, tool call and tool result counts as one, long ones are clipped).
+`max_consults` caps the agent's own questions per conversation (default 32). Every answer ends with how many consultations are left, so the agent can ration them. Past the cap the tool answers with a short notice and the agent carries on. Automatic interventions have their own cap (`max_interventions`, see below). With the opening plan switched off, the advisor is only consulted automatically (auto intervention) or by the agent (`consult_advisor`). The follow-up and consultation requests always carry the task itself, so they work without a plan. `recent_messages` sets how many of the agent's latest messages the advisor sees at each intervention or consultation (default 20, every text, tool call and tool result counts as one, long ones are clipped).
 
 Advisor Mode composes with Coding Mode. It is a loop mode of its own, so a conversation is either in Advisor Mode or in another loop mode (`/goal`, mission, custom loops), not both.
 
@@ -109,4 +109,4 @@ The thresholds are per agent: the **Mid-run auto intervention** card of the Advi
 
 ## Transcripts
 
-Every advisor exchange (plan request, plan, interventions and verdicts) is written to `~/.qwenpaw/advisor/<agent_id>/<session_id>.json`, outside the agent workspace on purpose, so the agent's own file searches never pick the advisor's log up as task material.
+Every advisor exchange (plan request, plan, interventions and verdicts) is written to `~/.qwenpaw/advisor/<agent_id>/<session_id>.json`, outside the agent workspace on purpose, so the agent's own file searches never pick the advisor's log up as task material. Each entry records the advisor's input and output token counts when the provider reports them. The advisor's calls also count towards the agent's token usage statistics, since they go through the same model factory.

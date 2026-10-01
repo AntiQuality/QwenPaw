@@ -411,7 +411,10 @@ async def test_advisor_builds_model_once_and_sends_msgs(monkeypatch):
     class _Model:
         async def __call__(self, messages, **kwargs):
             seen["messages"] = messages
-            return SimpleNamespace(content=[{"type": "text", "text": "PLAN"}])
+            return SimpleNamespace(
+                content=[{"type": "text", "text": "PLAN"}],
+                usage=SimpleNamespace(input_tokens=7, output_tokens=3),
+            )
 
     async def fake_factory(**kwargs):
         created.append(kwargs)
@@ -435,6 +438,7 @@ async def test_advisor_builds_model_once_and_sends_msgs(monkeypatch):
         ],
     )
     assert reply == "PLAN"
+    assert advisor.last_usage == {"input_tokens": 7, "output_tokens": 3}
     assert advisor.label == "dash:qwen3-max"
     assert created == [
         {
@@ -558,7 +562,7 @@ async def test_tool_consults_the_middleware_of_the_current_session(
     )
     consult = mode.tools()[0].func
     reply, chunks = await _tool_text(consult, "Keep going or switch?")
-    assert reply == "Switch to the other approach."
+    assert reply == "Switch to the other approach.\n\n(31 consultations left)"
     assert len(chunks) >= 2, "the answer streams in pieces"
     assert len({c.content[0].id for c in chunks}) == 1, "one text block"
     assert mw.consults_used == 1
@@ -591,7 +595,10 @@ async def test_tool_streams_through_the_agentscope_toolkit(monkeypatch):
     assert isinstance(final, ToolResponse)
     assert len(seen) >= 3, "at least two chunks before the response"
     assert len(final.content) == 1, "chunks merged into one text block"
-    assert final.content[0].text == "First half, second half."
+    assert (
+        final.content[0].text
+        == "First half, second half.\n\n(31 consultations left)"
+    )
 
 
 async def test_tool_without_session_or_when_disabled(monkeypatch):
