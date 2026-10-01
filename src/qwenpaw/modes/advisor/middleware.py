@@ -60,12 +60,14 @@ from agentscope.message import (
 from agentscope.middleware import MiddlewareBase
 
 from ...config.config import AdvisorModeConfig
+from ...runtime.prompt_contributors import _read_prompt_file
 from .prompts import (
     FALLBACK_ADVICE,
     ADVISOR_SYSTEM_PROMPT,
     CONSULT_REQUEST_TEMPLATE,
     ENV_SECTION_HEADER,
     FOLLOWUP_REQUEST_TEMPLATE,
+    GUIDANCE_SECTION_HEADER,
     NO_PLAN_NOTE,
     PLAN_REQUEST_TEMPLATE,
     SEVERITY_NOTES,
@@ -115,6 +117,10 @@ _PLAN_CALL_ARGS_JSON = json.dumps(_PLAN_CALL_ARGS)
 _FOLLOWUP_CALL_ARGS = {
     "question": "My recent steps keep failing. What should I do instead?",
 }
+
+# Project guidance for the advisor, read from the same directory as the
+# workspace listing and appended to its system prompt.
+GUIDANCE_FILE = "ADVISOR.md"
 
 # Workspace listing handed to the advisor as environment context.
 _LISTING_MAX_ENTRIES = 150
@@ -531,6 +537,8 @@ class AdvisorMiddleware(MiddlewareBase):
         self._recent_messages = max(1, int(recent_messages))
         self._trigger = trigger or InterventionTrigger()
         self._env_context_root = env_context_root
+        # ADVISOR.md, read on the first advisor call of the request.
+        self._guidance: str | None = None
         self._log_dir = Path(log_dir) if log_dir else None
         self._session_id = session_id
         self._agent_id = agent_id
@@ -1067,10 +1075,31 @@ class AdvisorMiddleware(MiddlewareBase):
         """Ask the advisor one self-contained question. ``on_text``
         receives the cumulative reply while it streams."""
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": ADVISOR_SYSTEM_PROMPT},
+            {"role": "system", "content": self._system_prompt()},
             {"role": "user", "content": message},
         ]
         return await self._advisor.ask(messages, on_text=on_text)
+
+    def _system_prompt(self) -> str:
+        """The advisor's system prompt, with the workspace's ADVISOR.md
+        appended as project guidance when there is one."""
+        if self._guidance is None:
+            self._guidance = self._read_guidance()
+        if not self._guidance:
+            return ADVISOR_SYSTEM_PROMPT
+        return (
+            f"{ADVISOR_SYSTEM_PROMPT}\n\n{GUIDANCE_SECTION_HEADER}\n\n"
+            f"{self._guidance}"
+        )
+
+    def _read_guidance(self) -> str:
+        """``ADVISOR.md`` from the directory the advisor plans for."""
+        if not self._env_context_root:
+            return ""
+        return (
+            _read_prompt_file(Path(self._env_context_root), GUIDANCE_FILE)
+            or ""
+        )
 
     def _recent_context(self, context: list[Msg]) -> str:
         """The agent's latest messages, as the advisor sees them."""

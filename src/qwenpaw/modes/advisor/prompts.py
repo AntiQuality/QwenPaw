@@ -206,6 +206,13 @@ TRIGGER_NOTES = {
 # Shown in place of the plan when none was written.
 NO_PLAN_NOTE = "(no opening plan was written for this conversation)"
 
+# Introduces the workspace's ADVISOR.md to the advisor.
+GUIDANCE_SECTION_HEADER = (
+    "# Project guidance\n\n"
+    "The user wrote the following for you about this workspace (its "
+    "ADVISOR.md). Follow it together with the principles above."
+)
+
 # Introduces the workspace listing to the advisor.
 ENV_SECTION_HEADER = (
     "Workspace file listing. Paths are relative to the workspace root, "
@@ -218,6 +225,7 @@ __all__ = [
     "ENV_SECTION_HEADER",
     "FALLBACK_ADVICE",
     "FOLLOWUP_REQUEST_TEMPLATE",
+    "GUIDANCE_SECTION_HEADER",
     "NO_PLAN_NOTE",
     "PLAN_REQUEST_TEMPLATE",
     "SEVERITY_NOTES",

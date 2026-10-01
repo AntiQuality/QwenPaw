@@ -18,6 +18,7 @@ from agentscope.message import (
 )
 
 from qwenpaw.config.config import AdvisorInterventionConfig
+from qwenpaw.modes.advisor.prompts import ADVISOR_SYSTEM_PROMPT
 from qwenpaw.modes.advisor.middleware import (
     _LiveExchange,
     CONSULT_BUDGET_EXHAUSTED,
@@ -717,6 +718,29 @@ def test_extract_instruction_uses_the_latest_user_message():
         AdvisorMiddleware._extract_instruction(agent.state.context)
         == "second task"
     )
+
+
+async def test_advisor_md_is_appended_to_the_system_prompt(tmp_path):
+    (tmp_path / "ADVISOR.md").write_text(
+        "---\ntitle: guidance\n---\nTests run with `make check`.\n",
+        encoding="utf-8",
+    )
+    mw = _plan_mw(["THE PLAN"], env_context_root=tmp_path)
+    await mw._inject_plan(_agent_with_task(), tools=[])
+    system = mw.advisor.calls[0][0]["content"]
+    assert system.startswith(ADVISOR_SYSTEM_PROMPT)
+    assert "# Project guidance" in system
+    assert "Tests run with `make check`." in system
+    assert "title: guidance" not in system, "frontmatter is stripped"
+
+
+async def test_system_prompt_is_unchanged_without_advisor_md(tmp_path):
+    mw = _plan_mw(["THE PLAN"], env_context_root=tmp_path)
+    await mw._inject_plan(_agent_with_task(), tools=[])
+    assert mw.advisor.calls[0][0]["content"] == ADVISOR_SYSTEM_PROMPT
+    mw = _plan_mw(["THE PLAN"])  # no directory at all
+    await mw._inject_plan(_agent_with_task(), tools=[])
+    assert mw.advisor.calls[0][0]["content"] == ADVISOR_SYSTEM_PROMPT
 
 
 async def test_plan_is_kept_for_the_later_requests():

@@ -93,6 +93,8 @@ In a multi-turn chat the plan is written once, for the first message of the conv
 
 The advisor's request includes the agent's tool list and a shallow listing of the working directory (the Coding Mode project directory when one is set, otherwise the agent workspace), so its plan is grounded in what is actually there.
 
+**Project guidance**: an `ADVISOR.md` in that same directory is appended to the advisor's system prompt. Put there what the advisor cannot see for itself: how the tests run, which directories are generated, conventions to keep. It works like `AGENTS.md` does for the agent, and the built-in principles stay in the package, so they keep updating with QwenPaw.
+
 ---
 
 ## When the advisor steps in
