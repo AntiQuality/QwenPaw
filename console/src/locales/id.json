@@ -35,6 +35,12 @@
     "paste": "Tempel",
     "yes": "Ya",
     "no": "Tidak",
+    "done": "Selesai",
+    "autoSaveFailed": "Perubahan tidak dapat disimpan",
+    "discardChangesTitle": "Buang perubahan yang belum disimpan?",
+    "discardChangesContent": "Beberapa perubahan tidak dapat disimpan. Anda dapat melanjutkan pengeditan atau membuang perubahan yang belum disimpan dan menutup jendela.",
+    "discardAndClose": "Buang dan tutup",
+    "keepEditing": "Lanjutkan mengedit",
     "configure": "Konfigurasi",
     "all": "Semua",
     "decrease": "Kurangi",
@@ -64,11 +70,37 @@
     }
   },
   "chunkError": {
+    "startup": {
+      "title": "Konsol tidak dapat dimulai",
+      "resource": "Sumber daya yang diperlukan untuk memulai aplikasi gagal dimuat.",
+      "runtime": "Terjadi kesalahan saat menginisialisasi aplikasi.",
+      "timeout": "Aplikasi belum selesai dimulai. Muat ulang halaman atau salin informasi kesalahan untuk pemeriksaan."
+    },
     "title": "Gagal memuat halaman",
     "subTitle": "Ini mungkin disebabkan oleh masalah jaringan atau pembaruan aplikasi.",
     "genericTitle": "Terjadi kesalahan",
     "genericSubTitle": "Terjadi kesalahan tak terduga saat merender halaman ini.",
-    "reload": "Muat ulang"
+    "reload": "Muat ulang",
+    "details": "Lihat detail kesalahan",
+    "copy": "Salin informasi kesalahan",
+    "copied": "Informasi kesalahan disalin",
+    "copyFailed": "Gagal menyalin. Buka detail dan salin secara manual.",
+    "checking": "Memeriksa ulang sumber daya yang gagal dimuat…",
+    "serverReadiness": {
+      "checking": "Menunggu layanan lokal dan sumber daya halaman tersedia…",
+      "timeout": "Layanan lokal atau sumber daya halaman masih belum tersedia. Coba muat ulang lagi sebentar lagi."
+    },
+    "recheckNote": "originalError adalah pengecualian awal; recheck adalah pemeriksaan ulang sumber daya setelah kegagalan, bukan respons awal. Nilai yang tidak diketahui tetap null. Pemeriksaan ulang tidak dapat membedakan masalah DNS, TLS, CORS, atau proxy.",
+    "observations": {
+      "missing": "Pemeriksaan ulang sumber daya: sumber daya saat ini tidak ditemukan (404).",
+      "denied": "Pemeriksaan ulang sumber daya: permintaan tanpa kredensial login ditolak.",
+      "html": "Pemeriksaan ulang sumber daya: URL modul mengembalikan halaman web.",
+      "http-error": "Pemeriksaan ulang sumber daya: server mengembalikan status kesalahan. Lihat detail kesalahan.",
+      "available": "Pemeriksaan ulang sumber daya berhasil; penyebab kegagalan awal belum diketahui.",
+      "request-failed": "Pemeriksaan ulang sumber daya: permintaan gagal; penyebab pastinya belum diketahui.",
+      "timeout": "Pemeriksaan ulang sumber daya: waktu tunggu habis; penyebab pastinya belum diketahui.",
+      "unavailable": "Sumber daya tidak dapat diperiksa ulang; penyebab kegagalan awal belum diketahui."
+    }
   },
   "portabilityImport": {
     "qwenpawOnly": "Impor hanya tersedia untuk agen yang menggunakan backend QwenPaw. Pilih agen QwenPaw untuk melanjutkan.",
@@ -1090,6 +1122,12 @@
     "acceptInvitation": "Bergabung melalui undangan"
   },
   "chat": {
+    "longTextPaste": {
+      "title": "Tempel teks panjang",
+      "asText": "Tempel sebagai teks",
+      "asFile": "Lampirkan sebagai file",
+      "characters": "{{count}} karakter"
+    },
     "historyLoadFailed": "Percakapan tidak dapat dimuat. Silakan buka kembali.",
     "newTask": "Tugas baru",
     "newChat": "Chat baru",
@@ -1116,7 +1154,6 @@
     "prompt1": "Mari mulai perjalanan baru!",
     "prompt2": "Bisa jelaskan skill apa saja yang Anda miliki?",
     "inputPlaceholder": "\"↑↓\" untuk navigasi pesan · \"/\" untuk perintah cepat",
-    "longTextUploadPrompt": "Harap baca file prompt yang diunggah dan jawab berdasarkan isinya.",
     "emptyOutputError": "Asisten mengembalikan respons kosong.",
     "commands": {
       "clear": {
@@ -1252,6 +1289,7 @@
     "turnCanceled": "Dihentikan"
   },
   "modelSelector": {
+    "noFallback": "Tidak digunakan",
     "selectModel": "Pilih model",
     "noConfiguredModels": "Tidak ada model yang dikonfigurasi",
     "noFreeModels": "Tidak ada model gratis tersedia",
@@ -2042,6 +2080,8 @@
     "webSearchApiKeyLabel": "Kunci API (opsional)",
     "webSearchQuotaHintBefore": "Gratis 100 panggilan/hari. Daftar di ",
     "webSearchQuotaHintAfter": " untuk 1.000/hari.",
+    "webSearchTavilyKeyHintBefore": "Opsional. Jika belum dikonfigurasi atau autentikasi gagal, pencarian gratis akan digunakan. Dapatkan kunci di ",
+    "webSearchTavilyKeyHintAfter": ".",
     "active": "aktif",
     "available": "Tersedia",
     "noEnabled": "Tidak ada alat yang diaktifkan",
@@ -2197,7 +2237,8 @@
       "runtime": "Eksekusi dan otomatisasi",
       "migration": "Migrasi aplikasi",
       "other": "Belum dikategorikan"
-    }
+    },
+    "webSearchConfigLoadError": "Gagal memuat kredensial penyedia ini. Coba lagi sebelum menyimpan."
   },
   "modelConfig": {
     "promptTitle": "Model LLM Diperlukan - Pilih di Chat Setelah Konfigurasi",
@@ -3630,6 +3671,9 @@
     "providersTitle": "Penyedia",
     "providersDescription": "Konfigurasi API key dan endpoint untuk setiap penyedia.",
     "llmTitle": "Model",
+    "defaultModels": "Model default",
+    "defaultChatModel": "Model percakapan",
+    "defaultDecisionModel": "Model keputusan",
     "defaultLlm": "LLM Default",
     "notConfiguredYet": "Belum dikonfigurasi",
     "llmDescription": "Atur model LLM default global dari penyedia yang diotorisasi. Anda dapat memilih model tertentu untuk setiap Agen di halaman Chat.",
@@ -4043,6 +4087,7 @@
     "rootMissing": "Hilang",
     "rootsPending": "{{count}} lainnya tersedia setelah pesan pertama",
     "sourceEmpty": "Belum ada file di sumber ini.",
+    "listFailed": "Gagal memuat daftar isi direktori. Silakan coba lagi.",
     "loadMore": "Muat 200 berikutnya",
     "upload": "Unggah file",
     "conflictPolicy": "Kebijakan konflik unggahan",
@@ -4062,6 +4107,11 @@
     "noSystemPromptCandidates": "Tidak ada file yang cocok.",
     "sourceControl": "Kontrol sumber",
     "preview": "Preview",
+    "htmlPreview": "Pratinjau HTML",
+    "htmlReadOnlyTitle": "Halaman ini berisi konten dinamis",
+    "htmlReadOnlyNotice": "Konten dinamis tidak dapat ditampilkan dalam pratinjau hanya baca ini. Buka file di browser untuk melihat tampilan lengkapnya.",
+    "htmlReadOnlyNotice_fallback": "Klik tombol di bawah untuk membuka halaman di browser dan melihat tampilan lengkapnya.",
+    "openHtmlInBrowser": "Buka di browser",
     "edit": "Edit",
     "selectFile": "Pilih file untuk dibuka",
     "closeTab": "Tutup tab",
