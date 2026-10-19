@@ -3,6 +3,7 @@
 """Unit tests for ``/api/advisor-mode``."""
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 import pytest
@@ -220,6 +221,76 @@ def test_post_can_switch_off_the_opening_plan(client, stored_config):
     assert resp.status_code == 200
     assert resp.json()["plan_enabled"] is False
     assert stored_config.advisor_mode.plan_enabled is False
+
+
+def test_exit_session_keeps_chat_and_ends_advisor_mode(
+    client,
+    monkeypatch,
+    stored_config,
+):
+    from qwenpaw.modes.advisor import AdvisorMode
+
+    mode = AdvisorMode()
+    mode.session_state("session-1").override = True
+    stored_config.advisor_mode.enabled = True
+    ctx = SimpleNamespace(session_id="session-1", agent_config=stored_config)
+    assert mode.is_active(ctx)
+    chat = SimpleNamespace(id="chat-1", session_id="session-1")
+    workspace = SimpleNamespace(
+        agent_id="agent-1",
+        chat_manager=SimpleNamespace(get_chat=AsyncMock(return_value=chat)),
+        task_tracker=SimpleNamespace(
+            get_status=AsyncMock(return_value="idle"),
+        ),
+        plugins=SimpleNamespace(modes=[mode]),
+    )
+
+    async def get_workspace(_request):
+        return workspace
+
+    monkeypatch.setattr(
+        advisor_router_module,
+        "get_agent_for_request",
+        get_workspace,
+    )
+    response = client.post(
+        "/api/advisor-mode/session/exit",
+        json={"chat_id": "chat-1"},
+    )
+    assert response.status_code == 204
+    assert not mode.is_active(ctx)
+    workspace.chat_manager.get_chat.assert_awaited_once_with("chat-1")
+
+
+def test_exit_session_rejects_a_running_chat(client, monkeypatch):
+    from qwenpaw.modes.advisor import AdvisorMode
+
+    mode = AdvisorMode()
+    mode.session_state("session-1").override = True
+    chat = SimpleNamespace(id="chat-1", session_id="session-1")
+    workspace = SimpleNamespace(
+        agent_id="agent-1",
+        chat_manager=SimpleNamespace(get_chat=AsyncMock(return_value=chat)),
+        task_tracker=SimpleNamespace(
+            get_status=AsyncMock(return_value="running"),
+        ),
+        plugins=SimpleNamespace(modes=[mode]),
+    )
+
+    async def get_workspace(_request):
+        return workspace
+
+    monkeypatch.setattr(
+        advisor_router_module,
+        "get_agent_for_request",
+        get_workspace,
+    )
+    response = client.post(
+        "/api/advisor-mode/session/exit",
+        json={"chat_id": "chat-1"},
+    )
+    assert response.status_code == 409
+    assert mode.session_state("session-1").override is True
 
 
 def test_post_updates_intervention_thresholds_partially(client, stored_config):

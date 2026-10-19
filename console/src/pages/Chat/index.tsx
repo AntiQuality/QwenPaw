@@ -4082,6 +4082,7 @@ export default function ChatPage() {
               <LoopModeSelector
                 className={isMobile ? styles.mobileComposerControl : undefined}
                 compact={isMobile}
+                chatId={backendChatId}
               />
             )}
             {usesQwenPawBackend ? (
@@ -4508,6 +4509,8 @@ export default function ChatPage() {
     scheduleHistoryClear,
     consoleSkills,
     loopAvailableModes,
+    advisorConversation,
+    backendChatId,
     selectedAgent,
     selectedAgentBackend,
     backendCapabilities,
@@ -4578,11 +4581,13 @@ export default function ChatPage() {
         <div className={styles.chatMainArea}>
           <div
             ref={chatMessagesAreaRef}
-            className={
-              isWideMode
-                ? `${styles.chatMessagesArea} ${styles.wideMode}`
-                : styles.chatMessagesArea
-            }
+            className={[
+              styles.chatMessagesArea,
+              isWideMode && styles.wideMode,
+              advisorConversation && styles.advisorComposer,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           >
             <LongTextPasteProvider
               enabled={supportsAttachments}

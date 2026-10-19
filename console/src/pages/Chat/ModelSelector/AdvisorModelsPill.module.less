@@ -1,4 +1,8 @@
-/* The Advisor pill names two models, so it gets more room than one. */
+/* Keep the model pair from pushing the sender actions onto a second row. */
+.pair {
+  max-width: min(380px, 28vw);
+}
+
 .pair > span:first-of-type {
-  max-width: min(340px, 50vw);
+  max-width: 100%;
 }

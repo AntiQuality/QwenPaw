@@ -59,7 +59,10 @@ export function AdvisorModelsPill() {
       onOpenChange={setOpen}
       placement="bottomRight"
     >
-      <Tooltip title={t("loop.advisorSetup.pairTooltip")} mouseEnterDelay={0.5}>
+      <Tooltip
+        title={`${t("loop.advisorSetup.pairTooltip")}: ${label}`}
+        mouseEnterDelay={0.5}
+      >
         <button
           type="button"
           aria-expanded={open}

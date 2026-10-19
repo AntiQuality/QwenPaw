@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..agent_context import get_agent_for_request
@@ -64,6 +64,10 @@ class AdvisorModeUpdateRequest(BaseModel):
     worker_model: Optional[ModelSlotBody] = None
 
 
+class AdvisorSessionExitRequest(BaseModel):
+    chat_id: str = Field(min_length=1)
+
+
 def _state(config) -> dict:
     """The Advisor Mode state the Console renders.
 
@@ -106,6 +110,27 @@ async def get_advisor_mode(request: Request) -> dict:
     workspace = await get_agent_for_request(request)
     config = await run_sync_io(load_agent_config, workspace.agent_id)
     return _state(config)
+
+
+@router.post("/session/exit", status_code=204)
+async def exit_advisor_session(
+    body: AdvisorSessionExitRequest,
+    request: Request,
+) -> None:
+    """End an idle chat's Advisor Mode while retaining its messages."""
+    from ...modes.advisor import AdvisorMode
+
+    workspace = await get_agent_for_request(request)
+    chat = await workspace.chat_manager.get_chat(body.chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    if await workspace.task_tracker.get_status(chat.id) == "running":
+        raise HTTPException(status_code=409, detail="Chat is still running")
+    for mode in getattr(workspace.plugins, "modes", []):
+        if isinstance(mode, AdvisorMode):
+            mode.end_session(chat.session_id)
+            return
+    raise HTTPException(status_code=404, detail="Advisor Mode unavailable")
 
 
 @router.post(

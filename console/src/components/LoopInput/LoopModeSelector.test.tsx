@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,7 @@ import {
   useLoopStore,
 } from "../../stores/loopStore";
 import { LoopModeSelector } from "./LoopModeSelector";
+import { advisorModeApi } from "../../api/modules/advisorMode";
 
 const { mockUseIsMobile } = vi.hoisted(() => ({
   mockUseIsMobile: vi.fn(() => false),
@@ -20,7 +21,11 @@ vi.mock("../../hooks/useIsMobile", () => ({
 
 vi.mock("../../api/modules/advisorMode", async () => ({
   ...(await vi.importActual<object>("../../api/modules/advisorMode")),
-  advisorModeApi: { get: vi.fn(async () => ({}) as never), update: vi.fn() },
+  advisorModeApi: {
+    get: vi.fn(async () => ({}) as never),
+    update: vi.fn(),
+    exitSession: vi.fn(),
+  },
 }));
 vi.mock("../../api/modules/provider", () => ({
   providerApi: { listProviders: vi.fn(async () => []) },
@@ -188,6 +193,61 @@ describe("LoopModeSelector", () => {
     renderWithProviders(<LoopModeSelector />);
 
     expect(screen.getByText("loop.awaiting_user")).toBeInTheDocument();
+  });
+
+  it("switches away from a completed Advisor turn without clearing the chat", async () => {
+    const user = userEvent.setup();
+    const advisor: LoopModeInfo = {
+      id: "advisor",
+      name: "advisor",
+      slash_command: "advisor",
+      description: "Advisor mode",
+      source: "builtin",
+    };
+    vi.mocked(advisorModeApi.exitSession).mockResolvedValueOnce(undefined);
+    useLoopStore
+      .getState()
+      .setAvailableModes([DEFAULT_LOOP_MODE, advisor, goal]);
+    useLoopStore.getState().setSessionMode(advisor, "awaiting_user");
+    renderWithProviders(<LoopModeSelector chatId="chat-1" />);
+
+    await user.click(screen.getByRole("button", { name: "loop.selectorAria" }));
+    await user.click(
+      screen.getByRole("option", { name: /loop.modes.goal.name/ }),
+    );
+
+    await waitFor(() =>
+      expect(useLoopStore.getState().selectedModeId).toBe("goal"),
+    );
+    expect(advisorModeApi.exitSession).toHaveBeenCalledWith("chat-1");
+    expect(useLoopStore.getState().sessionState).toBe("idle");
+  });
+
+  it("keeps Advisor active if exiting the session fails", async () => {
+    const user = userEvent.setup();
+    const advisor: LoopModeInfo = {
+      id: "advisor",
+      name: "advisor",
+      slash_command: "advisor",
+      description: "Advisor mode",
+      source: "builtin",
+    };
+    vi.mocked(advisorModeApi.exitSession).mockRejectedValueOnce(
+      new Error("busy"),
+    );
+    useLoopStore
+      .getState()
+      .setAvailableModes([DEFAULT_LOOP_MODE, advisor, goal]);
+    useLoopStore.getState().setSessionMode(advisor, "awaiting_user");
+    renderWithProviders(<LoopModeSelector chatId="chat-1" />);
+
+    await user.click(screen.getByRole("button", { name: "loop.selectorAria" }));
+    await user.click(
+      screen.getByRole("option", { name: /loop.modes.goal.name/ }),
+    );
+
+    expect(await screen.findByText("loop.switchError")).toBeInTheDocument();
+    expect(useLoopStore.getState().activeMode?.id).toBe("advisor");
   });
 
   // ---------------------------------------------------------------------------

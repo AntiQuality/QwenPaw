@@ -11,6 +11,7 @@ Both can be overridden per agent in ``advisor_mode.advisor_model`` /
 provider routing, retries, rate limiting and token accounting exactly like
 every other model call in QwenPaw.
 """
+
 from __future__ import annotations
 
 import logging
@@ -194,16 +195,22 @@ class AdvisorClient:
         if not isinstance(response, AsyncIterable):
             self.last_usage = _usage_counts(response)
             return extract_response_text(response)
-        # Streamed chunks carry the cumulative text, the last non-empty
-        # one wins. Token counts arrive with the final chunks.
+        # AgentScope emits text deltas until is_last, then a complete
+        # response. Do not append the complete response a second time.
         text = ""
         async for chunk in response:
             self.last_usage = _usage_counts(chunk) or self.last_usage
             chunk_text = extract_response_text(chunk)
             if chunk_text:
-                text = chunk_text
-                if on_text is not None:
-                    on_text(text)
+                updated = (
+                    chunk_text
+                    if getattr(chunk, "is_last", False)
+                    else text + chunk_text
+                )
+                if updated != text:
+                    text = updated
+                    if on_text is not None:
+                        on_text(text)
         return text
 
 

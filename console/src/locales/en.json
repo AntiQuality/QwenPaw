@@ -30,6 +30,7 @@
     "download": "Download",
     "refresh": "Refresh",
     "retry": "Retry",
+    "switchError": "Could not switch modes. Please try again.",
     "search": "Search",
     "enable": "Enable",
     "disable": "Disable",

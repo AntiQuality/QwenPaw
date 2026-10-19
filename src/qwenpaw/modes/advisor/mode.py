@@ -125,6 +125,10 @@ class AdvisorMode(AgentMode):
             self._sessions[session_id] = state
         return state
 
+    def end_session(self, session_id: str) -> None:
+        """End Advisor Mode for one conversation without clearing the chat."""
+        self._sessions.pop(session_id, None)
+
     def current_middleware(self) -> AdvisorMiddleware | None:
         """The middleware serving the request in flight, if any.
 
@@ -241,6 +245,11 @@ class AdvisorMode(AgentMode):
             consults_used=state.consults_used,
             plan_injected=state.plan_injected,
             plan=state.plan,
+            transcript=(
+                state.middleware.transcript
+                if state.middleware is not None
+                else None
+            ),
             recent_messages=am.recent_messages,
             env_context_root=env_root,
             log_dir=default_log_dir(agent_id),
@@ -293,13 +302,13 @@ class AdvisorMode(AgentMode):
             elif key:
                 # Leaving the mode ends the advisor's session, plan
                 # included, like a finished goal.
-                self._sessions.pop(key, None)
+                self.end_session(key)
             return _system_message(self._status_text(cfg, enabled))
 
         # Anything else is a task: start the mode and let the agent run it.
         if key:
             self.session_state(key).override = True
-        rewrite_user_msg(ctx, text)
+        rewrite_user_msg(ctx, text, preserve_non_text=True)
         logger.info(
             "Advisor Mode: started for session %s with task %r",
             key,

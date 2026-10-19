@@ -76,4 +76,12 @@ describe("advisorModeApi", () => {
       body: JSON.stringify({ followup_enabled: false }),
     });
   });
+
+  it("exits only the selected Advisor chat", async () => {
+    await advisorModeApi.exitSession("chat-1");
+    expect(request).toHaveBeenCalledWith("/advisor-mode/session/exit", {
+      method: "POST",
+      body: JSON.stringify({ chat_id: "chat-1" }),
+    });
+  });
 });

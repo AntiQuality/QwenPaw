@@ -72,4 +72,11 @@ export const advisorModeApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  /** Leave Advisor Mode in a completed chat without clearing its messages. */
+  exitSession: (chatId: string) =>
+    request<void>("/advisor-mode/session/exit", {
+      method: "POST",
+      body: JSON.stringify({ chat_id: chatId }),
+    }),
 };

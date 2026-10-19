@@ -2,6 +2,7 @@
 # pylint: disable=protected-access,unused-argument,redefined-outer-name
 """Tests for ``AdvisorMode``: activation, the worker-model hook, the
 ``/advisor`` command, middleware construction and the advisor client."""
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from agentscope.message import TextBlock
+from agentscope.message import Base64Source, DataBlock, TextBlock
 
 from qwenpaw.config.config import (
     AdvisorInterventionConfig,
@@ -24,6 +25,7 @@ from qwenpaw.modes.advisor import models as models_module
 from qwenpaw.modes.advisor.hooks import WorkerModelHook
 from qwenpaw.modes.advisor.tools import CONSULT_TOOL_NAME
 from qwenpaw.modes.base import find_active_explicit_mode
+from qwenpaw.modes.coding import CodingMode
 from qwenpaw.modes.advisor.models import (
     AdvisorClient,
     slot_label,
@@ -318,6 +320,21 @@ async def test_command_refuses_while_another_mode_is_active(monkeypatch):
     )
 
 
+async def test_command_can_start_with_code_capability_enabled():
+    cfg = _config()
+    cfg.coding_mode.enabled = True
+    mode = AdvisorMode()
+    ctx = _ctx(cfg)
+    ctx.workspace = SimpleNamespace(
+        plugins=SimpleNamespace(modes=[CodingMode(), mode]),
+    )
+
+    reply = await mode._command_handler(ctx, "on")
+    assert "on for this conversation" in _text(reply)
+    assert mode.is_active(ctx)
+    assert find_active_explicit_mode(ctx) == "advisor"
+
+
 @pytest.mark.parametrize("arg,expected", [("on", True), ("OFF", False)])
 async def test_command_on_off_switches_this_conversation(
     monkeypatch,
@@ -370,6 +387,27 @@ async def test_command_with_a_task_starts_the_mode_and_runs_it(
     # ... until the conversation is reset.
     await mode.on_conversation_reset(ctx)
     assert mode.is_active(ctx) is False
+
+
+async def test_command_with_a_task_keeps_attached_media():
+    from agentscope.message import UserMsg
+
+    cfg = _config()
+    mode = AdvisorMode()
+    ctx = _ctx(cfg)
+    image = DataBlock(
+        source=Base64Source(data="aGVsbG8=", media_type="image/png"),
+    )
+    ctx.input_msgs = [
+        UserMsg(
+            name="user",
+            content=[TextBlock(text="/advisor inspect this"), image],
+        ),
+    ]
+
+    assert await mode._command_handler(ctx, "inspect this") is None
+    assert ctx.input_msgs[-1].content[0].text == "inspect this"
+    assert ctx.input_msgs[-1].content[1] is image
 
 
 async def test_leaving_the_mode_switches_everything_off(monkeypatch):
@@ -453,6 +491,45 @@ async def test_advisor_builds_model_once_and_sends_msgs(monkeypatch):
 
     await advisor.ask([{"role": "user", "content": "again"}])
     assert len(created) == 1, "the model is built once and reused"
+
+
+async def test_advisor_streams_cumulative_text_from_incremental_chunks(
+    monkeypatch,
+):
+    from agentscope.model import ChatResponse
+
+    class _Model:
+        async def __call__(self, _messages):
+            async def stream():
+                for part in ("He", "llo"):
+                    yield ChatResponse(
+                        content=[TextBlock(text=part)],
+                        is_last=False,
+                    )
+                yield ChatResponse(
+                    content=[TextBlock(text="Hello")],
+                    is_last=True,
+                    usage=SimpleNamespace(input_tokens=5, output_tokens=2),
+                )
+
+            return stream()
+
+    async def fake_factory(**_kwargs):
+        return _Model(), None
+
+    monkeypatch.setattr(
+        "qwenpaw.agents.model_factory.create_model_and_formatter_async",
+        fake_factory,
+    )
+    advisor = AdvisorClient(agent_id="agent-1")
+    updates = []
+    reply = await advisor.ask(
+        [{"role": "user", "content": "Say hello"}],
+        on_text=updates.append,
+    )
+    assert updates == ["He", "Hello"]
+    assert reply == "Hello"
+    assert advisor.last_usage == {"input_tokens": 5, "output_tokens": 2}
 
 
 def test_mode_module_exports():
@@ -642,6 +719,27 @@ async def test_session_state_carries_plan_and_budget_across_requests(
     assert second.plan == "THE PLAN"
     assert second.consults_used == 1 and second.consults_left == 1
     assert mode.current_middleware() is second
+
+
+def test_transcript_keeps_previous_turns(isolated_advisor_dir):
+    mode = AdvisorMode()
+    cfg = _config()
+    first = mode.build_middleware(_ctx(cfg), cfg)
+    first._record_plan(request="make a plan", plan="First plan")
+
+    second = mode.build_middleware(_ctx(cfg), cfg)
+    second._record_consult({"question": "next step", "reply": "Continue"})
+
+    saved = json.loads(
+        (isolated_advisor_dir / "agent-1" / "sess-1.json").read_text(
+            encoding="utf-8",
+        ),
+    )
+    assert saved["plan"]["plan"] == "First plan"
+    assert saved["consults"] == [
+        {"question": "next step", "reply": "Continue"},
+    ]
+    assert not first.consults
 
 
 async def test_plan_is_written_once_per_conversation():

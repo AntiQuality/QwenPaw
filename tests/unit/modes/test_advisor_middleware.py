@@ -2,6 +2,7 @@
 # pylint: disable=protected-access,unused-argument,redefined-outer-name
 """Tests for AdvisorMiddleware: opening plan, mid-run intervention, the
 request-in-flight injection, and transcript persistence."""
+
 from __future__ import annotations
 
 import json
@@ -67,7 +68,7 @@ class _Advisor:
         if isinstance(reply, Exception):
             raise reply
         if on_text is not None:
-            # Stream it the way providers do: cumulative text per chunk.
+            # AdvisorClient's on_text callback provides cumulative text.
             step = max(1, len(reply) // 3)
             for end in range(step, len(reply), step):
                 on_text(reply[:end])

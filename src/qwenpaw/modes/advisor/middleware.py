@@ -30,10 +30,12 @@ plan and the agent's latest messages (clipped), so each call costs about
 the same however long the run gets. The plan is written once per
 conversation and carried over to its later turns.
 """
+
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import json
 import logging
 import time
@@ -521,6 +523,7 @@ class AdvisorMiddleware(MiddlewareBase):
         consults_used: int = 0,
         plan_injected: bool = False,
         plan: str = "",
+        transcript: dict[str, Any] | None = None,
         recent_messages: int = AdvisorModeConfig().recent_messages,
     ) -> None:
         self._advisor = advisor
@@ -559,14 +562,17 @@ class AdvisorMiddleware(MiddlewareBase):
         self._seen_result_ids: set[str] = set()
         self._baselined = False
         # Everything said to / by the advisor, persisted for analysis.
-        self._transcript: dict[str, Any] = {
-            "agent_id": agent_id,
-            "session_id": session_id,
-            "advisor": getattr(advisor, "label", ""),
-            "plan": None,
-            "interventions": [],
-            "consults": [],
-        }
+        if transcript is None:
+            self._transcript: dict[str, Any] = {
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "advisor": getattr(advisor, "label", ""),
+                "plan": None,
+                "interventions": [],
+                "consults": [],
+            }
+        else:
+            self._transcript = copy.deepcopy(transcript)
 
     # ── properties ──────────────────────────────────────────────────────
 
@@ -609,6 +615,11 @@ class AdvisorMiddleware(MiddlewareBase):
     def consults(self) -> list[dict[str, Any]]:
         """On-demand consultations recorded so far."""
         return list(self._transcript["consults"])
+
+    @property
+    def transcript(self) -> dict[str, Any]:
+        """The exchanges recorded across this conversation's turns."""
+        return self._transcript
 
     @property
     def consults_used(self) -> int:

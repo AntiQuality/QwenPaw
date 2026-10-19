@@ -19,9 +19,11 @@ import { useNavigate } from "react-router-dom";
 import {
   DEFAULT_LOOP_MODE,
   fetchAvailableLoopModes,
+  selectLoopModeAfterExit,
   type LoopModeInfo,
   useLoopStore,
 } from "../../stores/loopStore";
+import { advisorModeApi } from "../../api/modules/advisorMode";
 import { ADVISOR_LOOP_MODE_ID } from "../../constants/loopMode";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { OsDrawer } from "../../os/OsOverlay";
@@ -45,11 +47,13 @@ function ModeIcon({ mode, size = 14 }: { mode: LoopModeInfo; size?: number }) {
 interface LoopModeSelectorProps {
   className?: string;
   compact?: boolean;
+  chatId?: string | null;
 }
 
 export function LoopModeSelector({
   className,
   compact = false,
+  chatId,
 }: LoopModeSelectorProps = {}) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language || "en";
@@ -59,6 +63,8 @@ export function LoopModeSelector({
   // Opens by itself right after Advisor is picked. The chat header's
   // Advisor pill opens its own copy of the panel.
   const [advisorSetupOpen, setAdvisorSetupOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState(false);
   const availableModes = useLoopStore((state) => state.availableModes);
   const selectedModeId = useLoopStore((state) => state.selectedModeId);
   const sessionState = useLoopStore((state) => state.sessionState);
@@ -67,9 +73,14 @@ export function LoopModeSelector({
   const catalogError = useLoopStore((state) => state.catalogError);
   const setSelectedMode = useLoopStore((state) => state.setSelectedMode);
 
-  const selectedMode =
-    availableModes.find((mode) => mode.id === selectedModeId) ??
-    DEFAULT_LOOP_MODE;
+  const canSwitchAdvisor =
+    sessionState === "awaiting_user" &&
+    activeMode?.id === ADVISOR_LOOP_MODE_ID &&
+    Boolean(chatId);
+  const selectedMode = canSwitchAdvisor
+    ? activeMode
+    : availableModes.find((mode) => mode.id === selectedModeId) ??
+      DEFAULT_LOOP_MODE;
   const builtInModes = useMemo(
     () => availableModes.filter((mode) => mode.source === "builtin"),
     [availableModes],
@@ -79,7 +90,7 @@ export function LoopModeSelector({
     [availableModes],
   );
 
-  if (sessionState !== "idle" && activeMode) {
+  if (sessionState !== "idle" && activeMode && !canSwitchAdvisor) {
     const modeName = resolveLoopModeName(activeMode, t, lang);
     const tooltip =
       activeMode.source === "custom"
@@ -127,7 +138,22 @@ export function LoopModeSelector({
                 selected ? styles.selected : ""
               }`}
               key={mode.id}
-              onClick={() => {
+              disabled={switching}
+              onClick={async () => {
+                if (canSwitchAdvisor && mode.id !== activeMode?.id) {
+                  setSwitching(true);
+                  setSwitchError(false);
+                  try {
+                    await advisorModeApi.exitSession(chatId!);
+                    selectLoopModeAfterExit(mode.id);
+                    setOpen(false);
+                  } catch {
+                    setSwitchError(true);
+                  } finally {
+                    setSwitching(false);
+                  }
+                  return;
+                }
                 setSelectedMode(mode.id);
                 setOpen(false);
                 if (mode.id === ADVISOR_LOOP_MODE_ID) {
@@ -211,6 +237,9 @@ export function LoopModeSelector({
             </button>
           </div>
         ) : null}
+        {switchError ? (
+          <div className={styles.menuError}>{t("loop.switchError")}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -221,7 +250,7 @@ export function LoopModeSelector({
       aria-haspopup="listbox"
       aria-label={t("loop.selectorAria")}
       className={[styles.modeTrigger, className].filter(Boolean).join(" ")}
-      disabled={catalogLoading && availableModes.length === 0}
+      disabled={switching || (catalogLoading && availableModes.length === 0)}
       onClick={isMobile ? () => setOpen((current) => !current) : undefined}
       type="button"
     >
@@ -233,6 +262,11 @@ export function LoopModeSelector({
       {!compact && (
         <>
           <span>{resolveLoopModeName(selectedMode, t, lang)}</span>
+          {canSwitchAdvisor && (
+            <span className={styles.activeState}>
+              {t("loop.awaiting_user")}
+            </span>
+          )}
           <ChevronDown size={13} />
         </>
       )}
