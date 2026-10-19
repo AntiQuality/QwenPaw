@@ -4115,6 +4115,7 @@ export default function ChatPage() {
                 className={isMobile ? styles.mobileComposerControl : undefined}
                 compact={isMobile}
                 chatId={backendChatId}
+                agentId={selectedAgent}
               />
             )}
             {usesQwenPawBackend && !isSessionTransition ? (

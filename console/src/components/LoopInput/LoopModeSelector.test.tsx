@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/common_setup";
 import {
   DEFAULT_LOOP_MODE,
+  prepareLoopModeMessage,
   type LoopModeInfo,
   useLoopStore,
 } from "../../stores/loopStore";
@@ -248,6 +249,88 @@ describe("LoopModeSelector", () => {
 
     expect(await screen.findByText("loop.switchError")).toBeInTheDocument();
     expect(useLoopStore.getState().activeMode?.id).toBe("advisor");
+  });
+
+  it.each([
+    { change: "chats", chatId: "chat-b", agentId: "agent-a" },
+    { change: "agents", chatId: "chat-a", agentId: "agent-b" },
+  ])(
+    "ignores an Advisor exit response after changing $change",
+    async ({ chatId, agentId }) => {
+      const user = userEvent.setup();
+      const advisor: LoopModeInfo = {
+        id: "advisor",
+        name: "advisor",
+        slash_command: "advisor",
+        description: "Advisor mode",
+        source: "builtin",
+      };
+      let resolveExit!: () => void;
+      vi.mocked(advisorModeApi.exitSession).mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveExit = resolve;
+          }),
+      );
+      useLoopStore
+        .getState()
+        .setAvailableModes([DEFAULT_LOOP_MODE, advisor, goal]);
+      useLoopStore.getState().setSessionMode(advisor, "awaiting_user");
+      const { rerender } = renderWithProviders(
+        <LoopModeSelector chatId="chat-a" agentId="agent-a" />,
+      );
+
+      await user.click(
+        screen.getByRole("button", { name: "loop.selectorAria" }),
+      );
+      await user.click(
+        screen.getByRole("option", { name: /loop.modes.goal.name/ }),
+      );
+      expect(advisorModeApi.exitSession).toHaveBeenCalledWith("chat-a");
+
+      rerender(<LoopModeSelector chatId={chatId} agentId={agentId} />);
+      act(() => useLoopStore.getState().resetSessionMode());
+      await act(async () => resolveExit());
+
+      expect(useLoopStore.getState().selectedModeId).toBe("default");
+      expect(prepareLoopModeMessage("hello")).toBe("hello");
+    },
+  );
+
+  it("ignores an Advisor exit response after the selector unmounts", async () => {
+    const user = userEvent.setup();
+    const advisor: LoopModeInfo = {
+      id: "advisor",
+      name: "advisor",
+      slash_command: "advisor",
+      description: "Advisor mode",
+      source: "builtin",
+    };
+    let resolveExit!: () => void;
+    vi.mocked(advisorModeApi.exitSession).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveExit = resolve;
+        }),
+    );
+    useLoopStore
+      .getState()
+      .setAvailableModes([DEFAULT_LOOP_MODE, advisor, goal]);
+    useLoopStore.getState().setSessionMode(advisor, "awaiting_user");
+    const { unmount } = renderWithProviders(
+      <LoopModeSelector chatId="chat-a" agentId="agent-a" />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "loop.selectorAria" }));
+    await user.click(
+      screen.getByRole("option", { name: /loop.modes.goal.name/ }),
+    );
+    unmount();
+    act(() => useLoopStore.getState().setSessionMode(custom, "running"));
+    await act(async () => resolveExit());
+
+    expect(useLoopStore.getState().activeMode?.id).toBe("custom:quality");
+    expect(useLoopStore.getState().sessionState).toBe("running");
   });
 
   // ---------------------------------------------------------------------------

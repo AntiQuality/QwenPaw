@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { Popover, Tooltip } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
@@ -48,12 +48,19 @@ interface LoopModeSelectorProps {
   className?: string;
   compact?: boolean;
   chatId?: string | null;
+  agentId?: string | null;
+}
+
+interface SelectorScope {
+  chatId?: string | null;
+  agentId?: string | null;
 }
 
 export function LoopModeSelector({
   className,
   compact = false,
   chatId,
+  agentId,
 }: LoopModeSelectorProps = {}) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language || "en";
@@ -63,8 +70,22 @@ export function LoopModeSelector({
   // Opens by itself right after Advisor is picked. The chat header's
   // Advisor pill opens its own copy of the panel.
   const [advisorSetupOpen, setAdvisorSetupOpen] = useState(false);
-  const [switching, setSwitching] = useState(false);
-  const [switchError, setSwitchError] = useState(false);
+  const [switchingScope, setSwitchingScope] = useState<SelectorScope | null>(
+    null,
+  );
+  const [switchErrorScope, setSwitchErrorScope] =
+    useState<SelectorScope | null>(null);
+  const exitScopeVersion = useRef(0);
+  useEffect(
+    () => () => {
+      exitScopeVersion.current += 1;
+    },
+    [chatId, agentId],
+  );
+  const isCurrentScope = (scope: SelectorScope | null) =>
+    scope !== null && scope.chatId === chatId && scope.agentId === agentId;
+  const switching = isCurrentScope(switchingScope);
+  const switchError = isCurrentScope(switchErrorScope);
   const availableModes = useLoopStore((state) => state.availableModes);
   const selectedModeId = useLoopStore((state) => state.selectedModeId);
   const sessionState = useLoopStore((state) => state.sessionState);
@@ -141,16 +162,23 @@ export function LoopModeSelector({
               disabled={switching}
               onClick={async () => {
                 if (canSwitchAdvisor && mode.id !== activeMode?.id) {
-                  setSwitching(true);
-                  setSwitchError(false);
+                  const requestScope = { chatId, agentId };
+                  const requestVersion = exitScopeVersion.current;
+                  setSwitchingScope(requestScope);
+                  setSwitchErrorScope(null);
                   try {
                     await advisorModeApi.exitSession(chatId!);
+                    if (exitScopeVersion.current !== requestVersion) return;
                     selectLoopModeAfterExit(mode.id);
                     setOpen(false);
                   } catch {
-                    setSwitchError(true);
+                    if (exitScopeVersion.current === requestVersion) {
+                      setSwitchErrorScope(requestScope);
+                    }
                   } finally {
-                    setSwitching(false);
+                    if (exitScopeVersion.current === requestVersion) {
+                      setSwitchingScope(null);
+                    }
                   }
                   return;
                 }
