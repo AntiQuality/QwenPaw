@@ -54,6 +54,7 @@ interface LoopModeSelectorProps {
 interface SelectorScope {
   chatId?: string | null;
   agentId?: string | null;
+  version: number;
 }
 
 export function LoopModeSelector({
@@ -82,8 +83,12 @@ export function LoopModeSelector({
     },
     [chatId, agentId],
   );
+  // Returning to the same chat must not revive an earlier pending request.
   const isCurrentScope = (scope: SelectorScope | null) =>
-    scope !== null && scope.chatId === chatId && scope.agentId === agentId;
+    scope !== null &&
+    scope.chatId === chatId &&
+    scope.agentId === agentId &&
+    scope.version === exitScopeVersion.current;
   const switching = isCurrentScope(switchingScope);
   const switchError = isCurrentScope(switchErrorScope);
   const availableModes = useLoopStore((state) => state.availableModes);
@@ -162,8 +167,12 @@ export function LoopModeSelector({
               disabled={switching}
               onClick={async () => {
                 if (canSwitchAdvisor && mode.id !== activeMode?.id) {
-                  const requestScope = { chatId, agentId };
                   const requestVersion = exitScopeVersion.current;
+                  const requestScope = {
+                    chatId,
+                    agentId,
+                    version: requestVersion,
+                  };
                   setSwitchingScope(requestScope);
                   setSwitchErrorScope(null);
                   try {
